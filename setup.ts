@@ -2,484 +2,509 @@
 /**
  * Interactive Shopify Theme Development Setup Script
  *
- * This script will guide you through setting up a modern Shopify theme
- * development environment with Vite, Bun, and proper CI/CD workflows.
+ * Creates a modern Shopify theme development environment with:
+ * - Vite + Bun build system
+ * - Custom Elements with Section Registry
+ * - TypeScript or Vanilla JS
+ * - SCSS, CSS, or Tailwind (@apply pattern)
+ * - Theme event scanner
+ * - Specialized Claude agents
  */
 
-import { $, type ShellPromise } from "bun";
-import { readdir, mkdir, writeFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { $ } from 'bun';
+import { readdir, mkdir, writeFile, readFile, stat } from 'node:fs/promises';
+import { join, basename } from 'node:path';
 
-// ANSI color codes for terminal output
+// =============================================================================
+// TERMINAL COLORS & UTILITIES
+// =============================================================================
+
 const colors = {
-  reset: "\x1b[0m",
-  bright: "\x1b[1m",
-  cyan: "\x1b[36m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  red: "\x1b[31m",
-  blue: "\x1b[34m",
-  magenta: "\x1b[35m",
+  reset: '\x1b[0m',
+  bright: '\x1b[1m',
+  dim: '\x1b[2m',
+  cyan: '\x1b[36m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  red: '\x1b[31m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
 };
 
-function log(message: string, color = colors.reset) {
+function log(message: string, color = colors.reset): void {
   console.log(`${color}${message}${colors.reset}`);
 }
 
-function header(message: string) {
-  console.log("\n" + "=".repeat(60));
+function header(message: string): void {
+  console.log('\n' + '═'.repeat(60));
   log(message, colors.bright + colors.cyan);
-  console.log("=".repeat(60) + "\n");
+  console.log('═'.repeat(60) + '\n');
+}
+
+function subheader(message: string): void {
+  console.log('\n' + '─'.repeat(60));
+  log(message, colors.bright + colors.blue);
+  console.log('─'.repeat(60) + '\n');
 }
 
 async function prompt(question: string): Promise<string> {
-  log(question, colors.yellow);
-  const input = await Bun.stdin.stream().getReader();
-  let result = "";
+  process.stdout.write(`${colors.yellow}${question}${colors.reset} `);
+
+  const _reader = Bun.stdin.stream().getReader();
+  let _result = '';
 
   while (true) {
-    const { value, done } = await input.read();
+    const { value, done } = await _reader.read();
     if (done) break;
 
-    const text = new TextDecoder().decode(value);
-    if (text.includes("\n")) {
-      result += text.replace("\n", "").replace("\r", "");
+    const _text = new TextDecoder().decode(value);
+    if (_text.includes('\n')) {
+      _result += _text.replace('\n', '').replace('\r', '');
       break;
     }
-    result += text;
+    _result += _text;
   }
 
-  input.releaseLock();
-  return result.trim();
+  _reader.releaseLock();
+  return _result.trim();
 }
 
-function select(question: string, options: string[]): Promise<number> {
-  return new Promise(async (resolve) => {
-    log(question, colors.yellow);
-    options.forEach((option, index) => {
-      log(`  ${index + 1}. ${option}`, colors.cyan);
-    });
-
-    const answer = await prompt("Enter your choice (1-" + options.length + "):");
-    const choice = parseInt(answer);
-
-    if (choice >= 1 && choice <= options.length) {
-      resolve(choice - 1);
-    } else {
-      log("Invalid choice. Please try again.", colors.red);
-      resolve(await select(question, options));
-    }
+async function select(question: string, options: string[]): Promise<number> {
+  log(question, colors.yellow);
+  options.forEach((_option, _index) => {
+    log(`  ${_index + 1}. ${_option}`, colors.cyan);
   });
+
+  const _answer = await prompt(`Enter choice (1-${options.length}):`);
+  const _choice = parseInt(_answer);
+
+  if (_choice >= 1 && _choice <= options.length) {
+    return _choice - 1;
+  }
+
+  log('Invalid choice. Please try again.', colors.red);
+  return select(question, options);
 }
+
+// =============================================================================
+// TYPES
+// =============================================================================
 
 interface SetupConfig {
   projectName: string;
-  stylingApproach: "css" | "scss" | "postcss" | "tailwind";
-  jsApproach: "vanilla" | "typescript";
-  packageManager: "bun" | "npm" | "pnpm" | "yarn";
-  shopifyEnvironment: string;
+  projectNameSafe: string; // For window object (no hyphens)
+  stylingApproach: 'scss' | 'css' | 'tailwind';
+  jsApproach: 'typescript' | 'vanilla';
+  packageManager: 'bun' | 'yarn';
+  storeUrl: string;
+  environmentName: string;
   themeId: string | null;
-  enableTunnel?: boolean;
-  projectType?: string;
-  projectDescription?: string;
-  tomlApproach: "file" | "cli" | "skip";
-  storeUrl?: string;
-  lintingSetup: "eslint-prettier" | "theme-check" | "skip";
-  gitHooks: boolean;
 }
 
-async function getShopifyThemes(): Promise<Array<{ id: string; name: string; role: string }>> {
+interface ThemeInfo {
+  id: string;
+  name: string;
+  role: string;
+}
+
+interface ThemeScanResult {
+  events: { name: string; file: string; line: number }[];
+  customElements: { name: string; file: string }[];
+  globalObjects: string[];
+  pubsubPattern: boolean;
+}
+
+// =============================================================================
+// SHOPIFY HELPERS
+// =============================================================================
+
+async function getShopifyThemes(): Promise<ThemeInfo[]> {
   try {
-    const result = await $`shopify theme list --json`.text();
-    const themes = JSON.parse(result);
-    return themes;
-  } catch (error) {
-    log("Error fetching Shopify themes. Make sure you're authenticated with Shopify CLI.", colors.red);
+    const _result = await $`shopify theme list --json`.text();
+    return JSON.parse(_result);
+  } catch {
     return [];
   }
 }
 
-async function askQuestions(): Promise<SetupConfig> {
-  header("Shopify Theme Development Environment Setup");
+async function scanThemeForEvents(themePath: string): Promise<ThemeScanResult> {
+  const _result: ThemeScanResult = {
+    events: [],
+    customElements: [],
+    globalObjects: [],
+    pubsubPattern: false,
+  };
 
-  log("Welcome! This script will help you set up a modern Shopify theme development environment.", colors.green);
-  log("This setup includes Vite for fast development, Bun for package management, and CI/CD workflows.\n", colors.green);
+  const _eventPatterns = [
+    'cart:add',
+    'cart:update',
+    'cart:updated',
+    'cart:change',
+    'cart:refresh',
+    'variant:change',
+    'variant:changed',
+    'product:added',
+    'product:loaded',
+    'quickview:open',
+    'quickview:close',
+    'modal:open',
+    'modal:close',
+    'drawer:open',
+    'drawer:close',
+  ];
+
+  const _assetsPath = join(themePath, 'assets');
+
+  try {
+    const _files = await readdir(_assetsPath);
+    const _jsFiles = _files.filter(
+      (_f) => _f.endsWith('.js') && !_f.includes('.min.')
+    );
+
+    for (const _file of _jsFiles) {
+      const _content = await readFile(join(_assetsPath, _file), 'utf-8');
+      const _lines = _content.split('\n');
+
+      // Scan for event patterns
+      _lines.forEach((_line, _index) => {
+        for (const _pattern of _eventPatterns) {
+          if (_line.includes(`'${_pattern}'`) || _line.includes(`"${_pattern}"`)) {
+            _result.events.push({
+              name: _pattern,
+              file: _file,
+              line: _index + 1,
+            });
+          }
+        }
+
+        // Check for customElements.define
+        const _customElementMatch = _line.match(
+          /customElements\.define\s*\(\s*['"]([^'"]+)['"]/
+        );
+        if (_customElementMatch) {
+          _result.customElements.push({
+            name: _customElementMatch[1],
+            file: _file,
+          });
+        }
+
+        // Check for PubSub pattern
+        if (
+          _line.includes('PubSub') ||
+          _line.includes('pubsub') ||
+          _line.includes('publish') ||
+          _line.includes('subscribe')
+        ) {
+          _result.pubsubPattern = true;
+        }
+      });
+
+      // Check for global objects
+      if (_content.includes('window.theme')) {
+        _result.globalObjects.push('window.theme');
+      }
+      if (_content.includes('window.Shopify')) {
+        _result.globalObjects.push('window.Shopify');
+      }
+    }
+
+    // Deduplicate
+    _result.events = _result.events.filter(
+      (_e, _i, _arr) => _arr.findIndex((_x) => _x.name === _e.name) === _i
+    );
+    _result.globalObjects = [...new Set(_result.globalObjects)];
+  } catch {
+    // Assets folder might not exist yet
+  }
+
+  return _result;
+}
+
+function displayThemeScanResults(scan: ThemeScanResult): void {
+  subheader('Theme Event Analysis');
+
+  if (scan.events.length > 0) {
+    log('Found events:', colors.green);
+    scan.events.forEach((_e) => {
+      log(`  - ${_e.name} (${_e.file}:${_e.line})`, colors.cyan);
+    });
+  } else {
+    log('No custom events found in theme JS', colors.yellow);
+  }
+
+  console.log();
+
+  if (scan.customElements.length > 0) {
+    log('Registered Custom Elements:', colors.green);
+    scan.customElements.forEach((_e) => {
+      log(`  - <${_e.name}> (${_e.file})`, colors.cyan);
+    });
+  }
+
+  console.log();
+
+  if (scan.globalObjects.length > 0) {
+    log('Global Objects:', colors.green);
+    scan.globalObjects.forEach((_o) => {
+      log(`  - ${_o}`, colors.cyan);
+    });
+  }
+
+  if (scan.pubsubPattern) {
+    log('\nPubSub pattern detected - theme uses publish/subscribe events', colors.green);
+  }
+
+  // Recommendations
+  const _missingEvents = [
+    'cart:updated',
+    'variant:change',
+  ].filter((_e) => !scan.events.find((_x) => _x.name === _e));
+
+  if (_missingEvents.length > 0) {
+    log('\nRecommendations:', colors.yellow);
+    _missingEvents.forEach((_e) => {
+      log(`  - Consider dispatching '${_e}' event in your code`, colors.yellow);
+    });
+  }
+}
+
+// =============================================================================
+// INTERACTIVE QUESTIONS
+// =============================================================================
+
+async function askQuestions(): Promise<SetupConfig> {
+  header('Shopify Theme Development Setup');
+
+  log('This script sets up a modern Shopify theme development environment.', colors.green);
+  log('Custom Elements + Section Registry + Vite + Bun\n', colors.dim);
 
   // Question 1: Project Name
-  log("Let's start with some basic information about your project.\n", colors.cyan);
-  const projectName = await prompt("📦 What is your project/store name? (e.g., 'acme-store', 'my-boutique'):");
+  const _projectName = await prompt('Project name (e.g., acme-store):');
 
-  if (!projectName || projectName.trim() === "") {
-    log("⚠️  Project name is required. Please try again.", colors.red);
+  if (!_projectName || _projectName.trim() === '') {
+    log('Project name is required.', colors.red);
     process.exit(1);
   }
 
+  const _projectNameSafe = _projectName.replace(/-/g, '_').replace(/\s/g, '_').toLowerCase();
+
   // Question 2: Styling Approach
-  log("\n" + "─".repeat(60), colors.bright);
-  log("🎨 CSS Setup", colors.bright + colors.cyan);
-  log("─".repeat(60), colors.bright);
-  log("Choose your styling approach. We recommend plain CSS with CSS variables for most Shopify themes.", colors.yellow);
-  log("Note: This template enforces semantic class names (NO Tailwind-style utility classes).\n", colors.yellow);
+  subheader('Styling');
+  log('All options use semantic class names (BEM-style), mobile-first.\n', colors.dim);
 
-  const stylingChoice = await select(
-    "Which styling approach will you use?",
-    [
-      "Plain CSS (Recommended - simple, semantic, mobile-first)",
-      "SCSS/SASS (For variables, mixins, and nesting)",
-      "PostCSS with plugins (For advanced CSS processing)",
-      "Tailwind CSS (Utility-first - requires custom configuration)"
-    ]
-  );
-  const stylingMap: SetupConfig["stylingApproach"][] = ["css", "scss", "postcss", "tailwind"];
-  const stylingApproach = stylingMap[stylingChoice];
-
-  if (stylingApproach === "tailwind") {
-    log("\n⚠️  Note: While Tailwind is supported, this template's guidelines emphasize semantic class names.", colors.yellow);
-    log("You'll need to adapt the CLAUDE.md guidelines if you choose to use utility classes.\n", colors.yellow);
-  }
+  const _stylingChoice = await select('Which styling approach?', [
+    'SCSS (Recommended - tokens, mixins, nesting)',
+    'Plain CSS (CSS custom properties only)',
+    'Tailwind CSS (Using @apply in CSS files, NOT inline utilities)',
+  ]);
+  const _stylingMap: SetupConfig['stylingApproach'][] = ['scss', 'css', 'tailwind'];
+  const _stylingApproach = _stylingMap[_stylingChoice];
 
   // Question 3: JavaScript Approach
-  log("\n" + "─".repeat(60), colors.bright);
-  log("⚙️  JavaScript Setup", colors.bright + colors.cyan);
-  log("─".repeat(60), colors.bright);
-  log("Choose between vanilla JavaScript or TypeScript. Vanilla JS is simpler for most Shopify themes.\n", colors.yellow);
+  subheader('JavaScript');
 
-  const jsChoice = await select(
-    "Which JavaScript approach will you use?",
-    [
-      "Vanilla JavaScript (Recommended - simple, fast, perfect for Shopify)",
-      "TypeScript (For type safety, better IDE support, and larger projects)"
-    ]
-  );
-  const jsApproach: SetupConfig["jsApproach"] = jsChoice === 0 ? "vanilla" : "typescript";
+  const _jsChoice = await select('Which JavaScript approach?', [
+    'TypeScript (Recommended - type safety, better IDE support)',
+    'Vanilla JavaScript',
+  ]);
+  const _jsApproach: SetupConfig['jsApproach'] = _jsChoice === 0 ? 'typescript' : 'vanilla';
 
   // Question 4: Package Manager
-  log("\n" + "─".repeat(60), colors.bright);
-  log("📦 Package Manager", colors.bright + colors.cyan);
-  log("─".repeat(60), colors.bright);
-  log("We strongly recommend Bun - it's 3-10x faster than npm/yarn and has built-in TypeScript support.\n", colors.yellow);
+  subheader('Package Manager');
 
-  const pmChoice = await select(
-    "Which package manager will you use?",
-    [
-      "Bun (Recommended - 3-10x faster, modern, built-in TypeScript)",
-      "npm (Standard Node.js package manager)",
-      "pnpm (Efficient disk usage with hard links)",
-      "yarn (Reliable alternative to npm)"
-    ]
-  );
-  const pmMap: SetupConfig["packageManager"][] = ["bun", "npm", "pnpm", "yarn"];
-  const packageManager = pmMap[pmChoice];
+  const _pmChoice = await select('Which package manager?', [
+    'Bun (Recommended - 3-10x faster)',
+    'Yarn',
+  ]);
+  const _packageManager: SetupConfig['packageManager'] = _pmChoice === 0 ? 'bun' : 'yarn';
 
-  // Question 5: Theme Editor Development Setup
-  log("\n" + "─".repeat(60), colors.bright);
-  log("🔧 Development Environment", colors.bright + colors.cyan);
-  log("─".repeat(60), colors.bright);
-  log("For Shopify theme editor development, we recommend using Cloudflare tunnel to avoid CORS issues.", colors.yellow);
-  log("This requires cloudflared to be installed (brew install cloudflared).\n", colors.yellow);
+  // Question 5: Shopify Store Configuration
+  subheader('Shopify Store Configuration');
 
-  const tunnelChoice = await select(
-    "Do you want to enable Cloudflare tunnel for theme editor development?",
-    [
-      "Yes (Recommended - enables HTTPS tunnel for theme editor)",
-      "No (I'll configure HTTPS with mkcert or work without theme editor)"
-    ]
-  );
-  const enableTunnel = tunnelChoice === 0;
+  log('Creating shopify.theme.toml for store credentials.\n', colors.dim);
 
-  if (enableTunnel) {
-    log("\n✓ Cloudflare tunnel will be enabled in vite.config.js", colors.green);
-    log("✓ Vite will be locked to version 6.0.8 (required for tunnel support)", colors.green);
-    log("Make sure to install cloudflared: brew install cloudflared\n", colors.yellow);
+  const _storeUrl = await prompt('Store URL (e.g., your-store.myshopify.com):');
+  let _normalizedStoreUrl = _storeUrl.trim();
+  if (_normalizedStoreUrl && !_normalizedStoreUrl.includes('.myshopify.com')) {
+    _normalizedStoreUrl = _normalizedStoreUrl + '.myshopify.com';
   }
 
-  // Question 6: Shopify Theme Configuration (TOML)
-  log("\n" + "─".repeat(60), colors.bright);
-  log("📄 Shopify Theme Configuration", colors.bright + colors.cyan);
-  log("─".repeat(60), colors.bright);
-  log("The shopify.theme.toml file stores your store URL and theme IDs for different environments.", colors.yellow);
-  log("This file will be added to .gitignore at the end of setup to protect your credentials.\n", colors.yellow);
+  const _environmentName = (await prompt('Environment name (default: development):')) || 'development';
 
-  const tomlChoice = await select(
-    "How would you like to configure Shopify store access?",
-    [
-      "Create shopify.theme.toml file (Recommended - stores environment configs)",
-      "Use Shopify CLI login only (No .toml file, authenticate via CLI each time)",
-      "Skip for now (Configure manually later)"
-    ]
-  );
-  const tomlMap: SetupConfig["tomlApproach"][] = ["file", "cli", "skip"];
-  const tomlApproach = tomlMap[tomlChoice];
+  let _themeId: string | null = null;
 
-  let storeUrl = "";
+  if (_normalizedStoreUrl) {
+    log('\nFetching themes from store...', colors.cyan);
+    const _themes = await getShopifyThemes();
 
-  if (tomlApproach === "file") {
-    storeUrl = await prompt("\n🏪 Enter your Shopify store URL (e.g., your-store.myshopify.com):");
-    if (storeUrl && !storeUrl.includes(".myshopify.com")) {
-      storeUrl = storeUrl.replace(/\.myshopify\.com$/, "") + ".myshopify.com";
-    }
-    log(`✓ Store URL: ${storeUrl || "(will be configured later)"}`, colors.green);
-  } else if (tomlApproach === "cli") {
-    log("\n✓ You'll use Shopify CLI authentication", colors.green);
-    log("  Run 'shopify auth login' to authenticate before development", colors.yellow);
-  } else {
-    log("\n⏭️  Skipping store configuration. You can set this up later.", colors.yellow);
-  }
+    if (_themes.length > 0) {
+      log('', colors.reset);
+      const _themeOptions = _themes.map(
+        (_t) => `${_t.name} (${_t.role}) - ID: ${_t.id}`
+      );
+      _themeOptions.push('Skip - configure later');
 
-  // Question 7: Linting Setup
-  log("\n" + "─".repeat(60), colors.bright);
-  log("🔍 Code Quality Tools", colors.bright + colors.cyan);
-  log("─".repeat(60), colors.bright);
-  log("Linting helps catch errors and enforce consistent code style.\n", colors.yellow);
+      const _themeChoice = await select('Select theme for development:', _themeOptions);
 
-  const lintChoice = await select(
-    "Which linting setup would you like?",
-    [
-      "ESLint + Prettier (Recommended - Full JavaScript/TypeScript linting + formatting)",
-      "Theme Check only (Shopify Liquid linting)",
-      "Skip for now (Configure manually later)"
-    ]
-  );
-  const lintMap: SetupConfig["lintingSetup"][] = ["eslint-prettier", "theme-check", "skip"];
-  const lintingSetup = lintMap[lintChoice];
-
-  if (lintingSetup === "eslint-prettier") {
-    log("\n✓ ESLint + Prettier will be configured", colors.green);
-    log("  Format on save and pre-commit checks included", colors.cyan);
-  } else if (lintingSetup === "theme-check") {
-    log("\n✓ Theme Check will be configured for Liquid linting", colors.green);
-  }
-
-  // Question 8: Git Hooks
-  log("\n" + "─".repeat(60), colors.bright);
-  log("🪝 Git Hooks", colors.bright + colors.cyan);
-  log("─".repeat(60), colors.bright);
-  log("Git hooks run checks before commits to catch issues early.\n", colors.yellow);
-
-  const hooksChoice = await select(
-    "Would you like to set up Git hooks (husky + lint-staged)?",
-    [
-      "Yes (Recommended - Run linting/formatting on staged files before commit)",
-      "No (Skip Git hooks setup)"
-    ]
-  );
-  const gitHooks = hooksChoice === 0;
-
-  if (gitHooks) {
-    log("\n✓ Husky + lint-staged will be configured", colors.green);
-    log("  Pre-commit hooks will format and lint staged files", colors.cyan);
-  }
-
-  // Question 9: Shopify Store Connection
-  log("\n" + "─".repeat(60), colors.bright);
-  log("🛍️  Shopify Store Connection", colors.bright + colors.cyan);
-  log("─".repeat(60), colors.bright);
-  log("Now let's connect to your Shopify store and select a base theme.\n", colors.yellow);
-
-  log("Authenticating with Shopify CLI and fetching available themes...", colors.cyan);
-  const themes = await getShopifyThemes();
-
-  let shopifyEnvironment = "development";
-  let themeId: string | null = null;
-
-  if (themes.length > 0) {
-    log("\n✓ Successfully fetched themes from your store!\n", colors.green);
-    const themeOptions = themes.map(t => `${t.name} (${t.role}) - ID: ${t.id}`);
-    themeOptions.push("Skip - I'll configure this later");
-
-    const themeChoice = await select(
-      "Which theme would you like to use as a base?",
-      themeOptions
-    );
-
-    if (themeChoice < themes.length) {
-      themeId = themes[themeChoice].id;
-      log("\n✓ Selected theme: " + themes[themeChoice].name, colors.green);
-
-      const envName = await prompt("\nWhat would you like to name this environment? (e.g., 'development', 'staging', 'production'):");
-      shopifyEnvironment = envName.trim() || "development";
-      log(`✓ Environment will be named: ${shopifyEnvironment}`, colors.green);
+      if (_themeChoice < _themes.length) {
+        _themeId = _themes[_themeChoice].id;
+        log(`\nSelected: ${_themes[_themeChoice].name}`, colors.green);
+      }
     } else {
-      log("\n⏭️  Skipping theme selection. You can pull a theme later using 'shopify theme pull'", colors.yellow);
+      log('Could not fetch themes. Run "shopify auth login" first.', colors.yellow);
+      log('You can configure the theme ID manually in shopify.theme.toml\n', colors.dim);
     }
-  } else {
-    log("\n⚠️  No themes found or Shopify CLI not authenticated.", colors.yellow);
-    log("Make sure you've run 'shopify auth login' before running this setup.", colors.yellow);
-    log("You can pull a theme later using 'shopify theme pull'\n", colors.yellow);
   }
-
-  // Question 7: Project Context for CLAUDE.md
-  log("\n" + "─".repeat(60), colors.bright);
-  log("🤖 AI Assistant Configuration", colors.bright + colors.cyan);
-  log("─".repeat(60), colors.bright);
-  log("Help AI assistants (like Claude) understand your project better by providing context.\n", colors.yellow);
-
-  const projectType = await select(
-    "What type of Shopify store is this?",
-    [
-      "E-commerce (Standard online store)",
-      "Headless (API-driven, custom frontend)",
-      "B2B (Wholesale, bulk ordering)",
-      "Subscription (Recurring products)",
-      "Other/Custom"
-    ]
-  );
-
-  const projectTypeMap = ["e-commerce", "headless", "b2b", "subscription", "custom"];
-  const selectedProjectType = projectTypeMap[projectType];
-
-  const projectDescription = await prompt("\n📝 Brief description of this project (optional, press Enter to skip):");
 
   return {
-    projectName,
-    stylingApproach,
-    jsApproach,
-    packageManager,
-    shopifyEnvironment,
-    themeId,
-    enableTunnel,
-    projectType: selectedProjectType,
-    projectDescription: projectDescription.trim() || "",
-    tomlApproach,
-    storeUrl: storeUrl.trim() || "",
-    lintingSetup,
-    gitHooks,
+    projectName: _projectName,
+    projectNameSafe: _projectNameSafe,
+    stylingApproach: _stylingApproach,
+    jsApproach: _jsApproach,
+    packageManager: _packageManager,
+    storeUrl: _normalizedStoreUrl,
+    environmentName: _environmentName,
+    themeId: _themeId,
   };
 }
 
-async function createDirectoryStructure() {
-  header("Creating Directory Structure");
+// =============================================================================
+// FILE GENERATORS
+// =============================================================================
 
-  const dirs = [
-    "frontend/entrypoints",
-    "frontend/scripts/components",
-    "frontend/scripts/sections",
-    "frontend/scripts/hooks/core",
-    "frontend/styles",
-    "frontend/images",
-    "frontend/fonts",
-    ".github/workflows",
+async function createDirectoryStructure(config: SetupConfig): Promise<void> {
+  header('Creating Directory Structure');
+
+  const _ext = config.jsApproach === 'typescript' ? 'ts' : 'js';
+
+  const _dirs = [
+    '.claude/agents',
+    'frontend/entrypoints',
+    `frontend/scripts/components/sections`,
+    `frontend/scripts/components/shared`,
+    'frontend/scripts/hooks/core',
+    'frontend/scripts/types',
+    'frontend/scripts/constants',
+    'frontend/scripts/utils',
+    'frontend/styles/sections',
+    'frontend/styles/components',
+    '.github/workflows',
   ];
 
-  for (const dir of dirs) {
-    try {
-      await mkdir(dir, { recursive: true });
-      log(`✓ Created: ${dir}`, colors.green);
-    } catch (error) {
-      log(`✗ Failed to create: ${dir}`, colors.red);
-    }
-  }
-
-  // Create .gitkeep files
-  const gitkeepDirs = [
-    "frontend/scripts/sections",
-    "frontend/styles",
-    "frontend/images",
-    "frontend/fonts",
-  ];
-
-  for (const dir of gitkeepDirs) {
-    await writeFile(join(dir, ".gitkeep"), "");
+  for (const _dir of _dirs) {
+    await mkdir(_dir, { recursive: true });
+    log(`Created: ${_dir}`, colors.green);
   }
 }
 
-async function installDependencies(config: SetupConfig) {
-  header("Installing Dependencies");
+async function createPackageJson(config: SetupConfig): Promise<void> {
+  header('Creating package.json');
 
-  const baseDeps = [
-    config.enableTunnel ? "vite@6.0.8" : "vite", // Lock Vite to 6.0.8 for tunnel support
-    "vite-plugin-shopify",
-    "postcss",
-    "autoprefixer",
-    "npm-run-all",
-    "@shopify/theme-check-node",
-  ];
+  const _runCmd = config.packageManager === 'bun' ? 'bun run' : 'yarn';
 
-  if (config.stylingApproach === "scss") {
-    baseDeps.push("sass");
-  } else if (config.stylingApproach === "tailwind") {
-    baseDeps.push("tailwindcss");
-  }
-
-  if (config.jsApproach === "typescript") {
-    baseDeps.push("typescript", "@types/node");
-  }
-
-  log(`Installing dependencies with ${config.packageManager}...`, colors.cyan);
-  if (config.enableTunnel) {
-    log("  ⚡ Installing Vite 6.0.8 (required for tunnel compatibility)", colors.yellow);
-  }
-
-  try {
-    if (config.packageManager === "bun") {
-      await $`bun add -d ${baseDeps}`;
-    } else if (config.packageManager === "npm") {
-      await $`npm install --save-dev ${baseDeps}`;
-    } else if (config.packageManager === "pnpm") {
-      await $`pnpm add -D ${baseDeps}`;
-    } else {
-      await $`yarn add -D ${baseDeps}`;
-    }
-    log("✓ Dependencies installed successfully", colors.green);
-  } catch (error) {
-    log("✗ Error installing dependencies", colors.red);
-    console.error(error);
-  }
-}
-
-async function createPackageJson(config: SetupConfig) {
-  header("Creating package.json");
-
-  const packageJson = {
-    name: `${config.projectName}-shopify`,
-    version: "1.0.0",
-    type: "module",
-    packageManager: config.packageManager === "bun" ? "bun@1.3.0" : undefined,
+  const _packageJson = {
+    name: `${config.projectName}-theme`,
+    version: '1.0.0',
+    type: 'module',
+    packageManager: config.packageManager === 'bun' ? 'bun@1.2.0' : undefined,
     scripts: {
-      dev: 'run-p -sr "shopify:dev -- {@}" "vite:dev" --',
-      "dev:staging": 'run-p -sr "shopify:dev:staging -- {@}" "vite:dev" --',
-      "dev:production": 'run-p -sr "shopify:dev:production -- {@}" "vite:dev" --',
-      build: `${config.packageManager} vite:build`,
-      preview: "vite preview",
-      deploy: 'run-s "vite:build" "shopify:push -- {@}" --',
-      "deploy:staging": 'run-s "vite:build" "shopify:push:staging -- {@}" --',
-      "deploy:production": 'run-s "vite:build" "shopify:push:production -- {@}" --',
-      "shopify:dev": "shopify theme dev --environment development",
-      "shopify:dev:staging": "shopify theme dev --environment staging",
-      "shopify:dev:production": "shopify theme dev --environment production",
-      "shopify:push": "shopify theme push --environment development",
-      "shopify:push:staging": "shopify theme push --environment staging",
-      "shopify:push:production": "shopify theme push --environment production",
-      "vite:dev": "vite",
-      "vite:build": "vite build",
-      clean: "rm -rf dist assets/storefront.js assets/custom_styling.css",
+      dev: 'run-p -sr "shopify:dev" "vite:dev"',
+      build: `${_runCmd} vite:build`,
+      deploy: 'run-s "vite:build" "shopify:push"',
+      'deploy:staging': 'run-s "vite:build" "shopify:push:staging"',
+      'deploy:production': 'run-s "vite:build" "shopify:push:production"',
+      'shopify:dev': `shopify theme dev --environment ${config.environmentName}`,
+      'shopify:dev:staging': 'shopify theme dev --environment staging',
+      'shopify:dev:production': 'shopify theme dev --environment production',
+      'shopify:push': `shopify theme push --environment ${config.environmentName}`,
+      'shopify:push:staging': 'shopify theme push --environment staging',
+      'shopify:push:production': 'shopify theme push --environment production',
+      'vite:dev': 'vite',
+      'vite:build': 'vite build',
+      'type-check': config.jsApproach === 'typescript' ? 'tsc --noEmit' : undefined,
+      clean: 'rm -rf dist assets/storefront.js assets/custom_styling.css',
     },
   };
 
-  await writeFile("package.json", JSON.stringify(packageJson, null, 2));
-  log("✓ package.json created", colors.green);
+  // Remove undefined scripts
+  Object.keys(_packageJson.scripts).forEach((_key) => {
+    if (_packageJson.scripts[_key as keyof typeof _packageJson.scripts] === undefined) {
+      delete _packageJson.scripts[_key as keyof typeof _packageJson.scripts];
+    }
+  });
+
+  await writeFile('package.json', JSON.stringify(_packageJson, null, 2));
+  log('Created: package.json', colors.green);
 }
 
-async function createViteConfig(config: SetupConfig) {
-  header("Creating Vite Configuration");
+async function installDependencies(config: SetupConfig): Promise<void> {
+  header('Installing Dependencies');
 
-  const viteConfig = `import { fileURLToPath, URL } from 'node:url';
+  const _deps = [
+    'vite',
+    'vite-plugin-shopify',
+    'postcss',
+    'autoprefixer',
+    'npm-run-all',
+  ];
+
+  if (config.stylingApproach === 'scss') {
+    _deps.push('sass');
+  } else if (config.stylingApproach === 'tailwind') {
+    _deps.push('tailwindcss');
+  }
+
+  if (config.jsApproach === 'typescript') {
+    _deps.push('typescript', '@types/node');
+  }
+
+  log(`Installing with ${config.packageManager}...`, colors.cyan);
+
+  try {
+    if (config.packageManager === 'bun') {
+      await $`bun add -d ${_deps}`;
+    } else {
+      await $`yarn add -D ${_deps}`;
+    }
+    log('Dependencies installed successfully', colors.green);
+  } catch (_error) {
+    log('Error installing dependencies', colors.red);
+    console.error(_error);
+  }
+}
+
+async function createViteConfig(config: SetupConfig): Promise<void> {
+  header('Creating Vite Configuration');
+
+  const _scssConfig =
+    config.stylingApproach === 'scss'
+      ? `
+    preprocessorOptions: {
+      scss: {
+        additionalData: '@use "sass:math"; @use "sass:map";',
+        api: 'modern-compiler',
+        quietDeps: true,
+      }
+    }`
+      : '';
+
+  const _viteConfig = `import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 import shopify from 'vite-plugin-shopify';
 
-export default defineConfig(() => ({
+export default defineConfig({
   plugins: [
     shopify({
       themeRoot: './',
       sourceCodeDir: 'frontend',
       entrypointsDir: 'frontend/entrypoints',
-      additionalEntrypoints: [],${config.enableTunnel ? `
-      tunnel: true, // Enable Cloudflare tunnel for theme editor development` : ""}
+      additionalEntrypoints: [],
     }),
   ],
   resolve: {
     alias: {
       '~': fileURLToPath(new URL('./frontend', import.meta.url)),
+      '@': fileURLToPath(new URL('./frontend/scripts', import.meta.url)),
     },
   },
   build: {
@@ -493,201 +518,223 @@ export default defineConfig(() => ({
       }
     }
   },
-  server: {${config.enableTunnel ? `
-    allowedHosts: 'all', // Required for Cloudflare tunnel` : ""}
+  server: {
+    host: 'localhost',
     headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, HEAD, PUT, POST, PATCH, DELETE",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      "Access-Control-Allow-Credentials": "true"
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, PUT, POST, PATCH, DELETE',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     },
-    cors: {
-      origin: ["*"],
-      methods: ["GET", "HEAD", "PUT", "POST, PATCH", "DELETE"],
-      credentials: true,
-      allowedHeaders: ["Content-Type", "Authorization"]
-    }
   },
   css: {
-    devSourcemap: true,
-    modules: {
-      localsConvention: 'camelCase'
-    },${config.stylingApproach === "scss" ? `
-    preprocessorOptions: {
-      scss: {
-        additionalData: '@use "sass:math"; @use "sass:map";',
-        api: 'modern-compiler',
-        quietDeps: true,
-        logger: {
-          warn: () => { }
-        }
-      }
-    }` : ""}
+    devSourcemap: true,${_scssConfig}
   }
-}));
+});
 `;
 
-  await writeFile("vite.config.js", viteConfig);
-  log("✓ vite.config.js created", colors.green);
-
-  // Lock Vite to 6.0.8 if tunnel is enabled
-  if (config.enableTunnel) {
-    log("✓ Vite version will be locked to 6.0.8 for tunnel compatibility", colors.green);
-  }
+  await writeFile('vite.config.js', _viteConfig);
+  log('Created: vite.config.js', colors.green);
 }
 
-async function createPostCSSConfig(config: SetupConfig) {
-  header("Creating PostCSS Configuration");
-
-  let postcssConfig = `export default {
-  plugins: {
-    autoprefixer: {},
-  },
-}
-`;
-
-  if (config.stylingApproach === "tailwind") {
-    postcssConfig = `export default {
-  plugins: {
+async function createPostCSSConfig(config: SetupConfig): Promise<void> {
+  const _plugins =
+    config.stylingApproach === 'tailwind'
+      ? `{
     tailwindcss: {},
     autoprefixer: {},
-  },
+  }`
+      : `{
+    autoprefixer: {},
+  }`;
+
+  const _postcssConfig = `export default {
+  plugins: ${_plugins},
 }
 `;
-  }
 
-  await writeFile("postcss.config.js", postcssConfig);
-  log("✓ postcss.config.js created", colors.green);
+  await writeFile('postcss.config.js', _postcssConfig);
+  log('Created: postcss.config.js', colors.green);
 }
 
-async function createGitIgnore() {
-  header("Creating .gitignore");
+async function createTailwindConfig(config: SetupConfig): Promise<void> {
+  if (config.stylingApproach !== 'tailwind') return;
 
-  const gitignore = `# Node.js dependencies
+  header('Creating Tailwind Configuration');
+
+  const _tailwindConfig = `/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    './layout/**/*.liquid',
+    './sections/**/*.liquid',
+    './snippets/**/*.liquid',
+    './templates/**/*.liquid',
+    './frontend/**/*.{js,ts,css,scss}',
+  ],
+  theme: {
+    extend: {
+      // Add your custom theme extensions here
+      colors: {
+        // Use CSS variables from Shopify theme settings
+        primary: 'rgb(var(--color-button) / <alpha-value>)',
+        secondary: 'rgb(var(--color-accent) / <alpha-value>)',
+      },
+    },
+  },
+  plugins: [],
+}
+`;
+
+  await writeFile('tailwind.config.js', _tailwindConfig);
+  log('Created: tailwind.config.js', colors.green);
+
+  log('\nTailwind is configured to use @apply in CSS files.', colors.yellow);
+  log('DO NOT use inline utility classes in Liquid templates.\n', colors.yellow);
+}
+
+async function createTypeScriptConfig(config: SetupConfig): Promise<void> {
+  if (config.jsApproach !== 'typescript') return;
+
+  header('Creating TypeScript Configuration');
+
+  const _tsConfig = {
+    compilerOptions: {
+      target: 'ES2020',
+      module: 'ESNext',
+      moduleResolution: 'bundler',
+      strict: true,
+      noEmit: true,
+      skipLibCheck: true,
+      esModuleInterop: true,
+      allowSyntheticDefaultImports: true,
+      resolveJsonModule: true,
+      isolatedModules: true,
+      verbatimModuleSyntax: true,
+      lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+      baseUrl: '.',
+      paths: {
+        '~/*': ['./frontend/*'],
+        '@/*': ['./frontend/scripts/*'],
+      },
+    },
+    include: ['frontend/**/*'],
+    exclude: ['node_modules', 'assets'],
+  };
+
+  await writeFile('tsconfig.json', JSON.stringify(_tsConfig, null, 2));
+  log('Created: tsconfig.json', colors.green);
+}
+
+async function createShopifyThemeToml(config: SetupConfig): Promise<void> {
+  header('Creating shopify.theme.toml');
+
+  const _toml = `# Shopify Theme Configuration
+# This file is gitignored to protect credentials
+
+[environments.${config.environmentName}]
+store = "${config.storeUrl || 'your-store.myshopify.com'}"
+theme = "${config.themeId || 'YOUR_THEME_ID'}"
+ignore = [".shopifyignore"]
+
+# [environments.staging]
+# store = "${config.storeUrl || 'your-store.myshopify.com'}"
+# theme = "STAGING_THEME_ID"
+# ignore = [".shopifyignore"]
+
+# [environments.production]
+# store = "${config.storeUrl || 'your-store.myshopify.com'}"
+# theme = "PRODUCTION_THEME_ID"
+# ignore = [".shopifyignore"]
+`;
+
+  await writeFile('shopify.theme.toml', _toml);
+  log('Created: shopify.theme.toml', colors.green);
+}
+
+async function createGitIgnore(): Promise<void> {
+  const _gitignore = `# Dependencies
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-# Environment variables
+# Environment
 .env
+.env.*
 .env.local
-.env.*.local
-.env.development.local
-.env.test.local
-.env.production.local
 
 # Vite
 dist/
-dist-ssr/
-*.local
 .vite/
 
-# Editor directories and files
+# Shopify
+config/settings_data.json
+shopify.theme.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
 .idea/
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
 
-# OS files
-Thumbs.db
-.DS_Store
-*~
-.Spotlight-V100
-.Trashes
-
-# Shopify theme files
-config/settings_data.json
-
-# Build artifacts
+# Logs
 *.log
-*.tsbuildinfo
-
-# Lock files (keep only one)
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
 `;
 
-  await writeFile(".gitignore", gitignore);
-  log("✓ .gitignore created", colors.green);
+  await writeFile('.gitignore', _gitignore);
+  log('Created: .gitignore', colors.green);
 }
 
-async function createShopifyIgnore() {
-  header("Creating .shopifyignore");
-
-  const shopifyignore = `# Shopify Ignore - Files to exclude from theme uploads
-
-# Node modules
-node_modules/
-
-# Source files (Vite will build these)
+async function createShopifyIgnore(): Promise<void> {
+  const _shopifyignore = `# Source files (Vite compiles these)
 frontend/
 
 # Config files
 vite.config.js
 postcss.config.js
 tailwind.config.js
+tsconfig.json
 package.json
 bun.lockb
-package-lock.json
 yarn.lock
-pnpm-lock.yaml
 
-# Build configs
-.vite/
-tsconfig.json
-.eslintrc*
-.prettierrc*
-
-# Git files
+# Git
 .git/
 .gitignore
-.gitattributes
 
 # CI/CD
 .github/
 
 # Documentation
-README.md
-CLAUDE.md
-project_setup.md
 *.md
 
-# Setup script
+# Setup
 setup.ts
 
-# Environment files
+# Claude
+.claude/
+
+# Environment
 .env*
 
-# Editor directories
+# Editor
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# OS files
+# OS
 .DS_Store
-Thumbs.db
 `;
 
-  await writeFile(".shopifyignore", shopifyignore);
-  log("✓ .shopifyignore created", colors.green);
+  await writeFile('.shopifyignore', _shopifyignore);
+  log('Created: .shopifyignore', colors.green);
 }
 
-async function createGitHubWorkflow(config: SetupConfig) {
-  header("Creating GitHub Actions Workflow");
+async function createGitHubWorkflow(config: SetupConfig): Promise<void> {
+  const _pm = config.packageManager;
+  const _setupAction = _pm === 'bun' ? 'oven-sh/setup-bun@v1' : 'actions/setup-node@v4';
+  const _setupWith = _pm === 'bun' ? 'bun-version: latest' : 'node-version: 20';
 
-  const workflow = `name: Build Vite Assets
+  const _workflow = `name: Build Assets
 
 on:
   push:
@@ -700,135 +747,149 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup ${config.packageManager === "bun" ? "Bun" : "Node.js"}
-        uses: ${config.packageManager === "bun" ? "oven-sh/setup-bun@v1" : "actions/setup-node@v4"}${config.packageManager === "bun" ? `
+      - name: Setup ${_pm === 'bun' ? 'Bun' : 'Node.js'}
+        uses: ${_setupAction}
         with:
-          bun-version: latest` : ""}
+          ${_setupWith}
 
       - name: Install dependencies
-        run: ${config.packageManager} install
+        run: ${_pm} install
 
-      - name: Build Vite assets
-        run: ${config.packageManager} run build
+      - name: Build assets
+        run: ${_pm} run build
 
-      - name: Check for uncommitted changes in assets
+      - name: Check assets are in sync
         run: |
           git diff --exit-code assets/ || \\
-          (echo "Error: Built assets are out of sync. Run '${config.packageManager} run build' locally and commit the changes." && exit 1)
-
-      - name: Upload assets artifact
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: built-assets
-          path: assets/
-          retention-days: 7
+          (echo "Assets out of sync. Run '${_pm} run build' and commit." && exit 1)
 `;
 
-  await mkdir(".github/workflows", { recursive: true });
-  await writeFile(".github/workflows/build.yml", workflow);
-  log("✓ GitHub Actions workflow created", colors.green);
+  await writeFile('.github/workflows/build.yml', _workflow);
+  log('Created: .github/workflows/build.yml', colors.green);
 }
 
-async function createEntrypoints(config: SetupConfig) {
-  header("Creating Entry Point Files");
+// =============================================================================
+// FRONTEND FILES
+// =============================================================================
 
-  // Create storefront.js
-  const storefrontJs = `/**
- * Storefront JavaScript Entrypoint
+async function createEntrypoints(config: SetupConfig): Promise<void> {
+  header('Creating Entry Points');
+
+  const _ext = config.jsApproach === 'typescript' ? 'ts' : 'js';
+  const _styleExt = config.stylingApproach === 'scss' ? 'scss' : 'css';
+
+  // storefront.ts/js
+  const _storefront = `/**
+ * Storefront Entry Point
+ * Initializes Custom Elements and Section Registry
  */
 
 import 'vite/modulepreload-polyfill';
-import { consoleMessage, reportWebVitals, initGlobalEvents, handleUrlParams } from '~/scripts/utils';
-import { registerSectionLifecycles } from '~/scripts/hooks/core/sectionRegistry';
+import { registerAllSections } from '@/hooks/core/sectionRegistry';
+import { consoleMessage } from '@/utils';
 
-// Initialize global object
-window.${config.projectName.replace(/-/g, "")} = window.${config.projectName.replace(/-/g, "")} || {};
+// =============================================================================
+// GLOBAL STORE OBJECT
+// =============================================================================
 
-window.${config.projectName.replace(/-/g, "")}.settings = {
-  devMode: true,
-};
-
-window.${config.projectName.replace(/-/g, "")}.theme = {
-  shopName: window.Shopify?.shop || '${config.projectName}',
-  currency: window.Shopify?.currency?.active || 'USD',
-  currencySymbol: '$',
-  moneyFormat: window.theme?.moneyFormat || '${{amount}}',
-};
-
-window.${config.projectName.replace(/-/g, "")}.cart = {
-  count: window.Shopify?.cart?.item_count || 0,
-  total: window.Shopify?.cart?.total_price || 0,
-};
-
-window.${config.projectName.replace(/-/g, "")}.events = window.${config.projectName.replace(/-/g, "")}.events || new EventTarget();
-
-window.${config.projectName.replace(/-/g, "")}.utils = {
-  consoleMessage,
-  handleUrlParams,
-};
-
-window.${config.projectName.replace(/-/g, "")}.version = '1.0.0';
-
-consoleMessage('Store object initialized', 'info');
-
-const initializeApp = () => {
-  try {
-    consoleMessage('[InitializeApp] Starting application initialization', 'info');
-
-    initGlobalEvents();
-    consoleMessage('[InitializeApp] Global events initialized', 'info');
-
-    registerSectionLifecycles();
-    consoleMessage('[InitializeApp] Section lifecycles registered', 'info');
-
-    handleUrlParams();
-
-    if (window.Shopify?.cart) {
-      window.${config.projectName.replace(/-/g, "")}.cart.count = window.Shopify.cart.item_count || 0;
-      window.${config.projectName.replace(/-/g, "")}.cart.total = window.Shopify.cart.total_price || 0;
-    }
-
-    consoleMessage('[InitializeApp] Application initialization complete', 'info', {
-      version: window.${config.projectName.replace(/-/g, "")}.version,
-      devMode: window.${config.projectName.replace(/-/g, "")}.settings.devMode,
-      cartCount: window.${config.projectName.replace(/-/g, "")}.cart.count
-    });
-  } catch (error) {
-    consoleMessage('[InitializeApp] Error during application initialization', 'error', error);
+${config.jsApproach === 'typescript' ? `declare global {
+  interface Window {
+    ${config.projectNameSafe}: StorefrontGlobal;
+    Shopify?: {
+      shop?: string;
+      currency?: { active: string };
+      designMode?: boolean;
+    };
+    theme?: {
+      moneyFormat?: string;
+    };
   }
+}
+
+interface StorefrontGlobal {
+  settings: {
+    devMode: boolean;
+    debugEvents: boolean;
+  };
+  theme: {
+    shopName: string;
+    currency: string;
+    moneyFormat: string;
+  };
+  cart: {
+    count: number;
+    total: number;
+  };
+  events: EventTarget;
+  version: string;
+}
+` : ''}
+window.${config.projectNameSafe} = {
+  settings: {
+    devMode: import.meta.env.DEV,
+    debugEvents: false,
+  },
+  theme: {
+    shopName: window.Shopify?.shop || '${config.projectName}',
+    currency: window.Shopify?.currency?.active || 'USD',
+    moneyFormat: window.theme?.moneyFormat || '\${{amount}}',
+  },
+  cart: {
+    count: 0,
+    total: 0,
+  },
+  events: new EventTarget(),
+  version: '1.0.0',
 };
 
-window.addEventListener('DOMContentLoaded', initializeApp);
-window.addEventListener('load', reportWebVitals);
+// =============================================================================
+// INITIALIZATION
+// =============================================================================
 
-export default window.${config.projectName.replace(/-/g, "")};
+function initializeApp()${config.jsApproach === 'typescript' ? ': void' : ''} {
+  consoleMessage('[Init] Starting application', 'info');
+
+  // Register all section Custom Elements
+  registerAllSections();
+
+  consoleMessage('[Init] Application ready', 'info', {
+    version: window.${config.projectNameSafe}.version,
+    devMode: window.${config.projectNameSafe}.settings.devMode,
+  });
+}
+
+// Initialize on DOM ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeApp);
+} else {
+  initializeApp();
+}
+
+export default window.${config.projectNameSafe};
 `;
 
-  await writeFile("frontend/entrypoints/storefront.js", storefrontJs);
-  log("✓ storefront.js created", colors.green);
+  await writeFile(`frontend/entrypoints/storefront.${_ext}`, _storefront);
+  log(`Created: frontend/entrypoints/storefront.${_ext}`, colors.green);
 
-  // Create custom_styling.css or .scss
-  const fileExtension = config.stylingApproach === "scss" ? "scss" : "css";
-  const fileName = `frontend/entrypoints/custom_styling.${fileExtension}`;
+  // custom_styling.scss/css
+  let _styles = '';
 
-  let customStyles = "";
-
-  if (config.stylingApproach === "scss") {
-    // SCSS with tokens
-    customStyles = `/**
- * Custom Styling Entrypoint (SCSS)
+  if (config.stylingApproach === 'scss') {
+    _styles = `/**
+ * Custom Styling Entry Point (SCSS)
  */
 
-// Design Tokens
+// =============================================================================
+// DESIGN TOKENS
+// =============================================================================
+
 $colors: (
   'primary': rgb(var(--color-button)),
   'secondary': rgb(var(--color-accent)),
-  'text-primary': #1a1a1a,
-  'text-secondary': #666,
+  'text': #1a1a1a,
+  'text-muted': #666,
   'surface': #ffffff,
   'border': #e5e5e5,
 );
@@ -836,7 +897,7 @@ $colors: (
 $spacing: (
   'xs': 0.25rem,
   'sm': 0.5rem,
-  'base': 1rem,
+  'md': 1rem,
   'lg': 2rem,
   'xl': 4rem,
 );
@@ -846,7 +907,6 @@ $breakpoints: (
   'md': 768px,
   'lg': 1024px,
   'xl': 1280px,
-  '2xl': 1536px,
 );
 
 $transitions: (
@@ -855,18 +915,18 @@ $transitions: (
   'slow': 400ms ease,
 );
 
-// Centralized Media Query Mixins
-@mixin respond-to($breakpoint) {
+// =============================================================================
+// MIXINS
+// =============================================================================
+
+@mixin min($breakpoint) {
   @if map-has-key($breakpoints, $breakpoint) {
     @media (min-width: map-get($breakpoints, $breakpoint)) {
       @content;
     }
-  } @else {
-    @warn "Breakpoint #{$breakpoint} not found in $breakpoints map.";
   }
 }
 
-// Helper functions
 @function color($key) {
   @return map-get($colors, $key);
 }
@@ -879,54 +939,127 @@ $transitions: (
   @return map-get($transitions, $key);
 }
 
-// CSS Custom Properties for runtime theming
+// =============================================================================
+// CSS CUSTOM PROPERTIES
+// =============================================================================
+
 :root {
-  --color-primary: #{color('primary')};
-  --color-secondary: #{color('secondary')};
-  --spacing-base: #{spacing('base')};
-  --spacing-small: #{spacing('sm')};
-  --spacing-large: #{spacing('lg')};
+  --spacing-xs: #{spacing('xs')};
+  --spacing-sm: #{spacing('sm')};
+  --spacing-md: #{spacing('md')};
+  --spacing-lg: #{spacing('lg')};
+  --spacing-xl: #{spacing('xl')};
+  --transition-fast: #{transition('fast')};
   --transition-base: #{transition('base')};
   --border-radius: 4px;
 }
 
-// Utility Classes
+// =============================================================================
+// UTILITIES
+// =============================================================================
+
 .visually-hidden {
   position: absolute !important;
-  overflow: hidden;
   width: 1px;
   height: 1px;
-  margin: -1px;
   padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
   border: 0;
-  clip: rect(0 0 0 0);
-  word-wrap: normal !important;
 }
 
-// Import component styles
-// @import '../styles/product-card';
-// @import '../styles/cart-drawer';
+// =============================================================================
+// COMPONENT IMPORTS
+// =============================================================================
+
+// @use '../styles/sections/featured-collection';
+// @use '../styles/components/product-card';
 `;
-  } else {
-    // Plain CSS with centralized media queries via custom properties
-    customStyles = `/**
- * Custom Styling Entrypoint
+  } else if (config.stylingApproach === 'tailwind') {
+    _styles = `/**
+ * Custom Styling Entry Point (Tailwind)
+ *
+ * IMPORTANT: Use @apply in this file, NOT inline utilities in Liquid.
  */
 
-/* Design Tokens - CSS Custom Properties */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+// =============================================================================
+// CSS CUSTOM PROPERTIES (for Shopify theme settings)
+// =============================================================================
+
+:root {
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 2rem;
+  --spacing-xl: 4rem;
+  --transition-fast: 150ms ease;
+  --transition-base: 250ms ease;
+  --border-radius: 4px;
+}
+
+// =============================================================================
+// COMPONENT STYLES (using @apply)
+// =============================================================================
+
+.visually-hidden {
+  @apply absolute w-px h-px p-0 -m-px overflow-hidden whitespace-nowrap border-0;
+  clip: rect(0, 0, 0, 0);
+}
+
+// Example component using @apply:
+// .product-card {
+//   @apply flex flex-col gap-4;
+//   @apply bg-white rounded-lg shadow-sm;
+//   @apply transition-shadow duration-200;
+//
+//   &:hover {
+//     @apply shadow-md;
+//   }
+//
+//   &__title {
+//     @apply text-lg font-semibold text-gray-900;
+//   }
+//
+//   &__price {
+//     @apply text-base text-gray-600;
+//   }
+// }
+
+// =============================================================================
+// COMPONENT IMPORTS
+// =============================================================================
+
+// @import '../styles/sections/featured-collection';
+// @import '../styles/components/product-card';
+`;
+  } else {
+    _styles = `/**
+ * Custom Styling Entry Point (CSS)
+ */
+
+/* =============================================================================
+   DESIGN TOKENS
+   ============================================================================= */
+
 :root {
   /* Colors */
   --color-primary: rgb(var(--color-button));
   --color-secondary: rgb(var(--color-accent));
-  --color-text-primary: #1a1a1a;
-  --color-text-secondary: #666;
+  --color-text: #1a1a1a;
+  --color-text-muted: #666;
   --color-surface: #ffffff;
   --color-border: #e5e5e5;
 
   /* Spacing */
   --spacing-xs: 0.25rem;
   --spacing-sm: 0.5rem;
-  --spacing-base: 1rem;
+  --spacing-md: 1rem;
   --spacing-lg: 2rem;
   --spacing-xl: 4rem;
 
@@ -937,762 +1070,1325 @@ $transitions: (
 
   /* Borders */
   --border-radius: 4px;
-  --border-width: 1px;
-
-  /* Breakpoints (for use with min-width media queries) */
-  --breakpoint-sm: 640px;
-  --breakpoint-md: 768px;
-  --breakpoint-lg: 1024px;
-  --breakpoint-xl: 1280px;
-  --breakpoint-2xl: 1536px;
 }
 
-/* Utility Classes */
+/* =============================================================================
+   UTILITIES
+   ============================================================================= */
+
 .visually-hidden {
   position: absolute !important;
-  overflow: hidden;
   width: 1px;
   height: 1px;
-  margin: -1px;
   padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
   border: 0;
-  clip: rect(0 0 0 0);
-  word-wrap: normal !important;
 }
 
-/*
-  Centralized Media Query Guide
-  ==============================
-  Always use mobile-first approach with min-width:
+/* =============================================================================
+   COMPONENT IMPORTS
+   ============================================================================= */
 
-  Mobile:   Base styles (no media query)
-  Tablet:   @media (min-width: 768px)  { }
-  Desktop:  @media (min-width: 1024px) { }
-  Wide:     @media (min-width: 1280px) { }
-
-  Example:
-  .my-component {
-    padding: var(--spacing-sm);        // Mobile
-
-    @media (min-width: 768px) {
-      padding: var(--spacing-base);    // Tablet+
-    }
-
-    @media (min-width: 1024px) {
-      padding: var(--spacing-lg);      // Desktop+
-    }
-  }
-*/
-
-/* Import component styles */
-/* @import './styles/product-card.css'; */
-/* @import './styles/cart-drawer.css'; */
+/* @import '../styles/sections/featured-collection.css'; */
+/* @import '../styles/components/product-card.css'; */
 `;
   }
 
-  await writeFile(fileName, customStyles);
-  log(`✓ custom_styling.${fileExtension} created`, colors.green);
-
-  if (config.stylingApproach === "scss") {
-    log("  ✓ SCSS tokens and mixins configured", colors.green);
-  } else {
-    log("  ✓ Centralized media query guide added", colors.green);
-  }
+  await writeFile(`frontend/entrypoints/custom_styling.${_styleExt}`, _styles);
+  log(`Created: frontend/entrypoints/custom_styling.${_styleExt}`, colors.green);
 }
 
-async function createShopifyThemeToml(config: SetupConfig) {
-  if (config.tomlApproach === "skip" || config.tomlApproach === "cli") {
-    // Create only the example file for reference
-    header("Creating example.shopify.theme.toml");
+async function createUtilities(config: SetupConfig): Promise<void> {
+  header('Creating Utilities');
 
-    const exampleToml = `# Example Shopify Theme Configuration
-# Copy this file to shopify.theme.toml and update with your store details
+  const _ext = config.jsApproach === 'typescript' ? 'ts' : 'js';
+  const _typeAnnotations = config.jsApproach === 'typescript';
 
-[environments.development]
-store = "your-store.myshopify.com"
-theme = "your-theme-id"
-ignore = [".shopifyignore"]
-
-# Additional environment examples:
-# [environments.staging]
-# store = "your-store-staging.myshopify.com"
-# theme = "staging-theme-id"
-
-# [environments.production]
-# store = "your-store.myshopify.com"
-# theme = "live-theme-id"
-`;
-
-    await writeFile("example.shopify.theme.toml", exampleToml);
-    log("✓ example.shopify.theme.toml created for reference", colors.green);
-
-    if (config.tomlApproach === "cli") {
-      log("  Using CLI authentication - run 'shopify auth login' before development", colors.yellow);
-    } else {
-      log("  Copy this to shopify.theme.toml when ready to configure", colors.yellow);
-    }
-    return;
-  }
-
-  // Create actual shopify.theme.toml file
-  header("Creating shopify.theme.toml");
-
-  const storeUrl = config.storeUrl || "your-store.myshopify.com";
-  const themeId = config.themeId || "your-theme-id";
-
-  const themeToml = `# Shopify Theme Configuration
-# This file contains your store credentials - it will be added to .gitignore
-
-[environments.${config.shopifyEnvironment}]
-store = "${storeUrl}"
-theme = "${themeId}"
-ignore = [".shopifyignore"]
-
-# Additional environment examples (uncomment and configure as needed):
-# [environments.staging]
-# store = "${storeUrl}"
-# theme = "staging-theme-id"
-# ignore = [".shopifyignore"]
-
-# [environments.production]
-# store = "${storeUrl}"
-# theme = "live-theme-id"
-# ignore = [".shopifyignore"]
-`;
-
-  await writeFile("shopify.theme.toml", themeToml);
-  log("✓ shopify.theme.toml created", colors.green);
-  log(`  Store: ${storeUrl}`, colors.cyan);
-  log(`  Theme: ${themeId}`, colors.cyan);
-  log(`  Environment: ${config.shopifyEnvironment}`, colors.cyan);
-}
-
-async function setupLinting(config: SetupConfig) {
-  if (config.lintingSetup === "skip") {
-    log("\nSkipping linting setup", colors.yellow);
-    return;
-  }
-
-  header("Setting Up Linting");
-
-  if (config.lintingSetup === "eslint-prettier") {
-    // Install ESLint and Prettier dependencies
-    const deps = [
-      "eslint",
-      "prettier",
-      "eslint-config-prettier",
-      "eslint-plugin-prettier",
-      "@eslint/js",
-    ];
-
-    if (config.jsApproach === "typescript") {
-      deps.push("@typescript-eslint/eslint-plugin", "@typescript-eslint/parser");
-    }
-
-    log("Installing ESLint and Prettier...", colors.cyan);
-
-    try {
-      if (config.packageManager === "bun") {
-        await $`bun add -d ${deps}`;
-      } else if (config.packageManager === "npm") {
-        await $`npm install --save-dev ${deps}`;
-      } else if (config.packageManager === "pnpm") {
-        await $`pnpm add -D ${deps}`;
-      } else {
-        await $`yarn add -D ${deps}`;
-      }
-      log("✓ Linting dependencies installed", colors.green);
-    } catch (error) {
-      log("✗ Error installing linting dependencies", colors.red);
-      console.error(error);
-      return;
-    }
-
-    // Create ESLint config
-    const eslintConfig = config.jsApproach === "typescript"
-      ? `import js from "@eslint/js";
-import tseslint from "@typescript-eslint/eslint-plugin";
-import tsparser from "@typescript-eslint/parser";
-import prettier from "eslint-plugin-prettier";
-
-export default [
-  js.configs.recommended,
-  {
-    files: ["frontend/**/*.{js,ts}"],
-    languageOptions: {
-      parser: tsparser,
-      ecmaVersion: 2022,
-      sourceType: "module",
-    },
-    plugins: {
-      "@typescript-eslint": tseslint,
-      prettier,
-    },
-    rules: {
-      "prettier/prettier": "error",
-      "no-unused-vars": "off",
-      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
-      "no-console": ["warn", { allow: ["warn", "error"] }],
-    },
-  },
-  {
-    ignores: ["assets/**", "node_modules/**", "*.config.js"],
-  },
-];
-`
-      : `import js from "@eslint/js";
-import prettier from "eslint-plugin-prettier";
-
-export default [
-  js.configs.recommended,
-  {
-    files: ["frontend/**/*.js"],
-    languageOptions: {
-      ecmaVersion: 2022,
-      sourceType: "module",
-    },
-    plugins: {
-      prettier,
-    },
-    rules: {
-      "prettier/prettier": "error",
-      "no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
-      "no-console": ["warn", { allow: ["warn", "error"] }],
-    },
-  },
-  {
-    ignores: ["assets/**", "node_modules/**", "*.config.js"],
-  },
-];
-`;
-
-    await writeFile("eslint.config.js", eslintConfig);
-    log("✓ eslint.config.js created", colors.green);
-
-    // Create Prettier config
-    const prettierConfig = `{
-  "semi": true,
-  "singleQuote": true,
-  "tabWidth": 2,
-  "trailingComma": "es5",
-  "printWidth": 100,
-  "bracketSpacing": true,
-  "arrowParens": "always"
-}
-`;
-    await writeFile(".prettierrc", prettierConfig);
-    log("✓ .prettierrc created", colors.green);
-
-    // Create Prettier ignore
-    const prettierIgnore = `# Prettier ignore
-assets/
-node_modules/
-*.liquid
-*.json
-*.md
-bun.lockb
-`;
-    await writeFile(".prettierignore", prettierIgnore);
-    log("✓ .prettierignore created", colors.green);
-
-  } else if (config.lintingSetup === "theme-check") {
-    log("Theme Check is already included via @shopify/theme-check-node", colors.green);
-
-    // Create theme check config
-    const themeCheckConfig = `# Theme Check Configuration
-# https://shopify.dev/docs/themes/tools/theme-check
-
-root: .
-extends: :theme-app-extension
-
-# Ignore patterns
-ignore:
-  - node_modules/**
-  - frontend/**
-
-# Custom rules
-MatchingTranslations:
-  enabled: true
-
-RemoteAsset:
-  enabled: true
-  severity: suggestion
-`;
-    await writeFile(".theme-check.yml", themeCheckConfig);
-    log("✓ .theme-check.yml created", colors.green);
-  }
-}
-
-async function setupGitHooks(config: SetupConfig) {
-  if (!config.gitHooks) {
-    log("\nSkipping Git hooks setup", colors.yellow);
-    return;
-  }
-
-  header("Setting Up Git Hooks");
-
-  // Install husky and lint-staged
-  const deps = ["husky", "lint-staged"];
-
-  log("Installing husky and lint-staged...", colors.cyan);
-
-  try {
-    if (config.packageManager === "bun") {
-      await $`bun add -d ${deps}`;
-    } else if (config.packageManager === "npm") {
-      await $`npm install --save-dev ${deps}`;
-    } else if (config.packageManager === "pnpm") {
-      await $`pnpm add -D ${deps}`;
-    } else {
-      await $`yarn add -D ${deps}`;
-    }
-    log("✓ Git hooks dependencies installed", colors.green);
-  } catch (error) {
-    log("✗ Error installing Git hooks dependencies", colors.red);
-    console.error(error);
-    return;
-  }
-
-  // Initialize husky
-  try {
-    await $`npx husky init`;
-    log("✓ Husky initialized", colors.green);
-  } catch (error) {
-    log("⚠️ Husky init skipped (may need git init first)", colors.yellow);
-  }
-
-  // Create pre-commit hook
-  const preCommitHook = config.lintingSetup === "eslint-prettier"
-    ? `#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
-npx lint-staged
-`
-    : `#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
-# Run theme check on liquid files
-npx shopify theme check --fail-level error
-`;
-
-  try {
-    await mkdir(".husky", { recursive: true });
-    await writeFile(".husky/pre-commit", preCommitHook);
-    await $`chmod +x .husky/pre-commit`;
-    log("✓ Pre-commit hook created", colors.green);
-  } catch (error) {
-    log("⚠️ Pre-commit hook creation skipped", colors.yellow);
-  }
-
-  // Create lint-staged config
-  if (config.lintingSetup === "eslint-prettier") {
-    const lintStagedConfig = `{
-  "frontend/**/*.{js,ts}": [
-    "eslint --fix",
-    "prettier --write"
-  ],
-  "frontend/**/*.{css,scss}": [
-    "prettier --write"
-  ]
-}
-`;
-    await writeFile(".lintstagedrc", lintStagedConfig);
-    log("✓ .lintstagedrc created", colors.green);
-  }
-
-  // Add scripts to package.json
-  log("  Adding lint scripts to package.json...", colors.cyan);
-  try {
-    const { readFile } = await import("node:fs/promises");
-    const packageJsonContent = await readFile("package.json", "utf-8");
-    const packageJson = JSON.parse(packageJsonContent);
-
-    packageJson.scripts = packageJson.scripts || {};
-    packageJson.scripts.lint = config.lintingSetup === "eslint-prettier"
-      ? "eslint frontend/"
-      : "shopify theme check";
-    packageJson.scripts["lint:fix"] = config.lintingSetup === "eslint-prettier"
-      ? "eslint frontend/ --fix"
-      : "shopify theme check --auto-correct";
-    packageJson.scripts.format = "prettier --write frontend/";
-    packageJson.scripts.prepare = "husky";
-
-    await writeFile("package.json", JSON.stringify(packageJson, null, 2));
-    log("✓ Lint scripts added to package.json", colors.green);
-  } catch (error) {
-    log("⚠️ Could not update package.json scripts", colors.yellow);
-  }
-}
-
-async function addTomlToGitignore() {
-  header("Securing shopify.theme.toml");
-
-  const { readFile } = await import("node:fs/promises");
-
-  try {
-    let gitignoreContent = await readFile(".gitignore", "utf-8");
-
-    // Check if shopify.theme.toml is already in gitignore
-    if (!gitignoreContent.includes("shopify.theme.toml")) {
-      // Add it under the Shopify theme files section
-      gitignoreContent = gitignoreContent.replace(
-        "# Shopify theme files\nconfig/settings_data.json",
-        "# Shopify theme files\nconfig/settings_data.json\nshopify.theme.toml"
-      );
-
-      await writeFile(".gitignore", gitignoreContent);
-      log("✓ shopify.theme.toml added to .gitignore", colors.green);
-      log("  Your store credentials are now protected from being committed", colors.cyan);
-    } else {
-      log("✓ shopify.theme.toml already in .gitignore", colors.green);
-    }
-  } catch (error) {
-    log("✗ Error updating .gitignore", colors.red);
-    console.error(error);
-  }
-}
-
-async function createCoreFiles() {
-  header("Creating Core Utility Files");
-
-  // utils.js
-  const utilsJs = `/**
- * Core Utility Functions
+  // utils/index.ts
+  const _utils = `/**
+ * Utility Functions
  */
 
-export function consoleMessage(message, type = 'log', data = null) {
-  if (!window.${await prompt("Enter your project name again for utils:")} || !window.${await prompt("Enter your project name again for utils:")}.settings?.devMode) return;
+type LogLevel = 'log' | 'info' | 'warn' | 'error';
 
-  const prefix = '[Theme]';
-  const styles = {
-    log: 'color: #3b82f6',
-    info: 'color: #10b981',
+/**
+ * Console message that respects devMode setting
+ */
+export function consoleMessage(
+  message${_typeAnnotations ? ': string' : ''},
+  level${_typeAnnotations ? ': LogLevel' : ''} = 'log',
+  data${_typeAnnotations ? '?: unknown' : ''} = null
+)${_typeAnnotations ? ': void' : ''} {
+  if (!window.${config.projectNameSafe}?.settings?.devMode) return;
+
+  const _prefix = '[${config.projectName}]';
+  const _styles${_typeAnnotations ? ': Record<LogLevel, string>' : ''} = {
+    log: 'color: #6b7280',
+    info: 'color: #3b82f6',
     warn: 'color: #f59e0b',
     error: 'color: #ef4444',
   };
 
-  console[type](\`%c\${prefix} \${message}\`, styles[type] || styles.log, data || '');
-}
-
-export function reportWebVitals() {
-  if ('PerformanceObserver' in window) {
-    const observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        consoleMessage(\`Web Vital: \${entry.name} = \${entry.value.toFixed(2)}ms\`, 'info');
-      }
-    });
-
-    observer.observe({ entryTypes: ['paint', 'largest-contentful-paint'] });
+  if (data) {
+    console[level](\`%c\${_prefix} \${message}\`, _styles[level], data);
+  } else {
+    console[level](\`%c\${_prefix} \${message}\`, _styles[level]);
   }
 }
 
-export function initGlobalEvents() {
-  // Add global event listeners here
-  document.addEventListener('click', (e) => {
-    // Handle global clicks
-  });
-}
+/**
+ * Debounce function for rate-limiting
+ */
+export function debounce${_typeAnnotations ? '<T extends (...args: unknown[]) => void>' : ''}(
+  fn${_typeAnnotations ? ': T' : ''},
+  wait${_typeAnnotations ? ': number' : ''}
+)${_typeAnnotations ? ': (...args: Parameters<T>) => void' : ''} {
+  let _timeout${_typeAnnotations ? ': ReturnType<typeof setTimeout> | null' : ''} = null;
 
-export function handleUrlParams() {
-  const params = new URLSearchParams(window.location.search);
-
-  // Handle specific URL parameters
-  if (params.has('cart_open')) {
-    // Open cart
-    consoleMessage('Opening cart from URL parameter', 'info');
-  }
-}
-
-export function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
+  return function executedFunction(...args${_typeAnnotations ? ': Parameters<T>' : ''}) {
+    if (_timeout) clearTimeout(_timeout);
+    _timeout = setTimeout(() => fn(...args), wait);
   };
 }
+
+/**
+ * Throttle function for rate-limiting
+ */
+export function throttle${_typeAnnotations ? '<T extends (...args: unknown[]) => void>' : ''}(
+  fn${_typeAnnotations ? ': T' : ''},
+  wait${_typeAnnotations ? ': number' : ''}
+)${_typeAnnotations ? ': (...args: Parameters<T>) => void' : ''} {
+  let _lastTime = 0;
+
+  return function executedFunction(...args${_typeAnnotations ? ': Parameters<T>' : ''}) {
+    const _now = Date.now();
+    if (_now - _lastTime >= wait) {
+      _lastTime = _now;
+      fn(...args);
+    }
+  };
+}
+
+/**
+ * Dispatch custom event on window.${config.projectNameSafe}.events
+ */
+export function dispatchStoreEvent(
+  name${_typeAnnotations ? ': string' : ''},
+  detail${_typeAnnotations ? '?: unknown' : ''} = {}
+)${_typeAnnotations ? ': void' : ''} {
+  const _event = new CustomEvent(name, { detail });
+  window.${config.projectNameSafe}.events.dispatchEvent(_event);
+
+  if (window.${config.projectNameSafe}.settings.debugEvents) {
+    consoleMessage(\`Event: \${name}\`, 'info', detail);
+  }
+}
+
+/**
+ * Subscribe to custom event on window.${config.projectNameSafe}.events
+ */
+export function subscribeToStoreEvent(
+  name${_typeAnnotations ? ': string' : ''},
+  callback${_typeAnnotations ? ': (event: CustomEvent) => void' : ''}
+)${_typeAnnotations ? ': () => void' : ''} {
+  const _handler = (event${_typeAnnotations ? ': Event' : ''}) => callback(event${_typeAnnotations ? ' as CustomEvent' : ''});
+  window.${config.projectNameSafe}.events.addEventListener(name, _handler);
+
+  // Return unsubscribe function
+  return () => window.${config.projectNameSafe}.events.removeEventListener(name, _handler);
+}
 `;
 
-  await writeFile("frontend/scripts/utils.js", utilsJs);
-  log("✓ utils.js created", colors.green);
+  await writeFile(`frontend/scripts/utils/index.${_ext}`, _utils);
+  log(`Created: frontend/scripts/utils/index.${_ext}`, colors.green);
+}
 
-  // Section registry
-  const sectionRegistry = `/**
- * Section Registry
- * Manages section lifecycles for Shopify Theme Editor
+async function createConstants(config: SetupConfig): Promise<void> {
+  const _ext = config.jsApproach === 'typescript' ? 'ts' : 'js';
+  const _typeAnnotations = config.jsApproach === 'typescript';
+
+  const _constants = `/**
+ * Global Constants
  */
 
-const sectionInstances = new Map();
+export const BREAKPOINTS${_typeAnnotations ? ': Readonly<Record<string, number>>' : ''} = {
+  SM: 640,
+  MD: 768,
+  LG: 1024,
+  XL: 1280,
+}${_typeAnnotations ? ' as const' : ''};
 
-export function registerSection(sectionId, callbacks) {
-  if (!sectionInstances.has(sectionId)) {
-    sectionInstances.set(sectionId, []);
-  }
-  sectionInstances.get(sectionId).push(callbacks);
-}
+export const ANIMATION${_typeAnnotations ? ': Readonly<{ DURATION: Record<string, number>; EASING: Record<string, string> }>' : ''} = {
+  DURATION: {
+    FAST: 150,
+    BASE: 250,
+    SLOW: 400,
+  },
+  EASING: {
+    DEFAULT: 'ease',
+    SPRING: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
+    SMOOTH: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+}${_typeAnnotations ? ' as const' : ''};
 
-export function registerSectionLifecycles() {
-  if (typeof window.Shopify !== 'undefined' && window.Shopify.designMode) {
-    document.addEventListener('shopify:section:load', (event) => {
-      const sectionId = event.target.dataset.sectionId;
-      const callbacks = sectionInstances.get(sectionId);
-      if (callbacks) {
-        callbacks.forEach(cb => cb.onLoad?.(event.target));
-      }
-    });
+export const SELECTORS${_typeAnnotations ? ': Readonly<Record<string, string>>' : ''} = {
+  SECTION: '[data-section-id]',
+  SECTION_TYPE: '[data-section-type]',
+}${_typeAnnotations ? ' as const' : ''};
 
-    document.addEventListener('shopify:section:unload', (event) => {
-      const sectionId = event.target.dataset.sectionId;
-      const callbacks = sectionInstances.get(sectionId);
-      if (callbacks) {
-        callbacks.forEach(cb => cb.onUnload?.(event.target));
-      }
-    });
-  } else {
-    // Initial load
-    const sections = document.querySelectorAll('[data-section-id]');
-    sections.forEach(section => {
-      const sectionId = section.dataset.sectionId;
-      const callbacks = sectionInstances.get(sectionId);
-      if (callbacks) {
-        callbacks.forEach(cb => cb.onLoad?.(section));
-      }
-    });
-  }
-}
+export const EVENTS${_typeAnnotations ? ': Readonly<Record<string, string>>' : ''} = {
+  CART_UPDATED: 'cart:updated',
+  CART_ADD: 'cart:add',
+  VARIANT_CHANGE: 'variant:change',
+  MODAL_OPEN: 'modal:open',
+  MODAL_CLOSE: 'modal:close',
+  DRAWER_OPEN: 'drawer:open',
+  DRAWER_CLOSE: 'drawer:close',
+}${_typeAnnotations ? ' as const' : ''};
 `;
 
-  await writeFile("frontend/scripts/hooks/core/sectionRegistry.js", sectionRegistry);
-  log("✓ sectionRegistry.js created", colors.green);
+  await writeFile(`frontend/scripts/constants/index.${_ext}`, _constants);
+  log(`Created: frontend/scripts/constants/index.${_ext}`, colors.green);
 }
 
-async function pullShopifyTheme(config: SetupConfig) {
+async function createSectionRegistry(config: SetupConfig): Promise<void> {
+  header('Creating Section Registry');
+
+  const _ext = config.jsApproach === 'typescript' ? 'ts' : 'js';
+  const _typeAnnotations = config.jsApproach === 'typescript';
+
+  const _sectionRegistry = `/**
+ * Section Registry
+ *
+ * Manages Custom Element registration and Shopify Theme Editor lifecycle.
+ * Each section component is a Custom Element that extends HTMLElement.
+ */
+
+import { consoleMessage } from '@/utils';
+
+${_typeAnnotations ? `
+// =============================================================================
+// TYPES
+// =============================================================================
+
+export interface SectionCallbacks {
+  /** Called when section loads (page load or Theme Editor) */
+  onLoad?: (container: HTMLElement) => void;
+  /** Called when section unloads (Theme Editor only) */
+  onUnload?: (container: HTMLElement) => void;
+  /** Called when a block is selected in Theme Editor */
+  onBlockSelect?: (event: CustomEvent) => void;
+  /** Called when a block is deselected in Theme Editor */
+  onBlockDeselect?: (event: CustomEvent) => void;
+  /** Called when section is selected in Theme Editor */
+  onSelect?: (event: CustomEvent) => void;
+  /** Called when section is deselected in Theme Editor */
+  onDeselect?: (event: CustomEvent) => void;
+}
+
+interface RegisteredSection {
+  elementName: string;
+  callbacks: SectionCallbacks;
+}
+` : ''}
+// =============================================================================
+// REGISTRY
+// =============================================================================
+
+const _registeredSections${_typeAnnotations ? ': Map<string, RegisteredSection>' : ''} = new Map();
+
+/**
+ * Register a Custom Element as a section component
+ *
+ * @param sectionType - The section type (matches data-section-type in Liquid)
+ * @param elementName - The custom element tag name (e.g., 'featured-collection')
+ * @param elementClass - The Custom Element class
+ * @param callbacks - Optional Theme Editor lifecycle callbacks
+ */
+export function registerSection${_typeAnnotations ? '<T extends typeof HTMLElement>' : ''}(
+  sectionType${_typeAnnotations ? ': string' : ''},
+  elementName${_typeAnnotations ? ': string' : ''},
+  elementClass${_typeAnnotations ? ': T' : ''},
+  callbacks${_typeAnnotations ? ': SectionCallbacks' : ''} = {}
+)${_typeAnnotations ? ': void' : ''} {
+  // Register Custom Element (check first to avoid errors)
+  if (!customElements.get(elementName)) {
+    customElements.define(elementName, elementClass);
+    consoleMessage(\`Registered: <\${elementName}>\`, 'info');
+  }
+
+  // Store for Theme Editor lifecycle
+  _registeredSections.set(sectionType, { elementName, callbacks });
+}
+
+/**
+ * Register all section components
+ * Import and register your sections here
+ */
+export function registerAllSections()${_typeAnnotations ? ': void' : ''} {
+  // Example:
+  // import { FeaturedCollection } from '@/components/sections/featured-collection';
+  // registerSection('featured-collection', 'featured-collection', FeaturedCollection, {
+  //   onBlockSelect: (event) => { /* handle block select */ },
+  // });
+
+  consoleMessage('Section registration complete', 'info');
+}
+
+// =============================================================================
+// THEME EDITOR LIFECYCLE
+// =============================================================================
+
+/**
+ * Initialize Theme Editor event listeners
+ * Only active when Shopify.designMode is true
+ */
+export function initThemeEditorListeners()${_typeAnnotations ? ': void' : ''} {
+  if (!window.Shopify?.designMode) return;
+
+  document.addEventListener('shopify:section:load', _handleSectionLoad);
+  document.addEventListener('shopify:section:unload', _handleSectionUnload);
+  document.addEventListener('shopify:section:select', _handleSectionSelect);
+  document.addEventListener('shopify:section:deselect', _handleSectionDeselect);
+  document.addEventListener('shopify:block:select', _handleBlockSelect);
+  document.addEventListener('shopify:block:deselect', _handleBlockDeselect);
+
+  consoleMessage('Theme Editor listeners initialized', 'info');
+}
+
+function _handleSectionLoad(event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} {
+  const _container = (event${_typeAnnotations ? ' as CustomEvent' : ''}).target${_typeAnnotations ? ' as HTMLElement' : ''};
+  const _sectionType = _container?.dataset?.sectionType;
+
+  if (!_sectionType) return;
+
+  const _section = _registeredSections.get(_sectionType);
+  _section?.callbacks.onLoad?.(_container);
+}
+
+function _handleSectionUnload(event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} {
+  const _container = (event${_typeAnnotations ? ' as CustomEvent' : ''}).target${_typeAnnotations ? ' as HTMLElement' : ''};
+  const _sectionType = _container?.dataset?.sectionType;
+
+  if (!_sectionType) return;
+
+  const _section = _registeredSections.get(_sectionType);
+  _section?.callbacks.onUnload?.(_container);
+}
+
+function _handleSectionSelect(event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} {
+  const _customEvent = event${_typeAnnotations ? ' as CustomEvent' : ''};
+  const _container = _customEvent.target${_typeAnnotations ? ' as HTMLElement' : ''};
+  const _sectionType = _container?.dataset?.sectionType;
+
+  if (!_sectionType) return;
+
+  const _section = _registeredSections.get(_sectionType);
+  _section?.callbacks.onSelect?.(_customEvent);
+}
+
+function _handleSectionDeselect(event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} {
+  const _customEvent = event${_typeAnnotations ? ' as CustomEvent' : ''};
+  const _container = _customEvent.target${_typeAnnotations ? ' as HTMLElement' : ''};
+  const _sectionType = _container?.dataset?.sectionType;
+
+  if (!_sectionType) return;
+
+  const _section = _registeredSections.get(_sectionType);
+  _section?.callbacks.onDeselect?.(_customEvent);
+}
+
+function _handleBlockSelect(event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} {
+  const _customEvent = event${_typeAnnotations ? ' as CustomEvent' : ''};
+  const _container = (_customEvent.target${_typeAnnotations ? ' as HTMLElement' : ''})?.closest('[data-section-type]')${_typeAnnotations ? ' as HTMLElement | null' : ''};
+  const _sectionType = _container?.dataset?.sectionType;
+
+  if (!_sectionType) return;
+
+  const _section = _registeredSections.get(_sectionType);
+  _section?.callbacks.onBlockSelect?.(_customEvent);
+}
+
+function _handleBlockDeselect(event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} {
+  const _customEvent = event${_typeAnnotations ? ' as CustomEvent' : ''};
+  const _container = (_customEvent.target${_typeAnnotations ? ' as HTMLElement' : ''})?.closest('[data-section-type]')${_typeAnnotations ? ' as HTMLElement | null' : ''};
+  const _sectionType = _container?.dataset?.sectionType;
+
+  if (!_sectionType) return;
+
+  const _section = _registeredSections.get(_sectionType);
+  _section?.callbacks.onBlockDeselect?.(_customEvent);
+}
+
+// Initialize Theme Editor listeners
+initThemeEditorListeners();
+`;
+
+  await writeFile(`frontend/scripts/hooks/core/sectionRegistry.${_ext}`, _sectionRegistry);
+  log(`Created: frontend/scripts/hooks/core/sectionRegistry.${_ext}`, colors.green);
+}
+
+async function createExampleSection(config: SetupConfig): Promise<void> {
+  header('Creating Example Section Component');
+
+  const _ext = config.jsApproach === 'typescript' ? 'ts' : 'js';
+  const _typeAnnotations = config.jsApproach === 'typescript';
+
+  const _exampleSection = `/**
+ * Example Section Component (Custom Element)
+ *
+ * Usage in Liquid:
+ * <featured-collection
+ *   data-section-id="{{ section.id }}"
+ *   data-section-type="featured-collection"
+ * >
+ *   ...
+ * </featured-collection>
+ */
+
+import { consoleMessage } from '@/utils';
+
+${_typeAnnotations ? `
+interface FeaturedCollectionConfig {
+  autoplay: boolean;
+  speed: number;
+}
+` : ''}
+export class FeaturedCollection extends HTMLElement {
+  // Cache DOM references
+  _container${_typeAnnotations ? ': HTMLElement | null' : ''} = null;
+  _slides${_typeAnnotations ? ': NodeListOf<HTMLElement> | null' : ''} = null;
+
+  // State
+  _isInitialized = false;
+  _config${_typeAnnotations ? ': FeaturedCollectionConfig' : ''} = {
+    autoplay: false,
+    speed: 300,
+  };
+
+  // ==========================================================================
+  // LIFECYCLE
+  // ==========================================================================
+
+  /**
+   * Called when element is added to DOM
+   */
+  connectedCallback()${_typeAnnotations ? ': void' : ''} {
+    // Guard: prevent double initialization
+    if (this._isInitialized) return;
+
+    this._init();
+  }
+
+  /**
+   * Called when element is removed from DOM
+   */
+  disconnectedCallback()${_typeAnnotations ? ': void' : ''} {
+    this._destroy();
+  }
+
+  // ==========================================================================
+  // INITIALIZATION
+  // ==========================================================================
+
+  _init()${_typeAnnotations ? ': void' : ''} {
+    // Parse config from data attributes
+    this._parseConfig();
+
+    // Cache DOM elements
+    this._cacheElements();
+
+    // Guard: required elements
+    if (!this._container) {
+      consoleMessage('FeaturedCollection: Missing container', 'warn');
+      return;
+    }
+
+    // Bind events
+    this._bindEvents();
+
+    this._isInitialized = true;
+    consoleMessage('FeaturedCollection initialized', 'info');
+  }
+
+  _parseConfig()${_typeAnnotations ? ': void' : ''} {
+    const _configAttr = this.dataset.config;
+    if (!_configAttr) return;
+
+    try {
+      const _parsed = JSON.parse(_configAttr);
+      this._config = { ...this._config, ..._parsed };
+    } catch {
+      consoleMessage('FeaturedCollection: Invalid config JSON', 'warn');
+    }
+  }
+
+  _cacheElements()${_typeAnnotations ? ': void' : ''} {
+    this._container = this.querySelector('.featured-collection__container');
+    this._slides = this.querySelectorAll('.featured-collection__slide');
+  }
+
+  _bindEvents()${_typeAnnotations ? ': void' : ''} {
+    // Example: bind click handler
+    // this._container?.addEventListener('click', this._handleClick);
+  }
+
+  // ==========================================================================
+  // CLEANUP
+  // ==========================================================================
+
+  _destroy()${_typeAnnotations ? ': void' : ''} {
+    // Remove event listeners
+    // this._container?.removeEventListener('click', this._handleClick);
+
+    // Clear references
+    this._container = null;
+    this._slides = null;
+    this._isInitialized = false;
+
+    consoleMessage('FeaturedCollection destroyed', 'info');
+  }
+
+  // ==========================================================================
+  // EVENT HANDLERS (use arrow functions to preserve 'this')
+  // ==========================================================================
+
+  _handleClick = (event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} => {
+    const _target = event.target${_typeAnnotations ? ' as HTMLElement' : ''};
+
+    // Early return pattern
+    if (!_target) return;
+    if (!_target.closest('.featured-collection__item')) return;
+
+    // Main logic
+    consoleMessage('Item clicked', 'info', { target: _target });
+  };
+}
+
+// Note: Registration happens in sectionRegistry.ts
+// registerSection('featured-collection', 'featured-collection', FeaturedCollection);
+`;
+
+  await writeFile(
+    `frontend/scripts/components/sections/featured-collection.${_ext}`,
+    _exampleSection
+  );
+  log(`Created: frontend/scripts/components/sections/featured-collection.${_ext}`, colors.green);
+}
+
+// =============================================================================
+// CLAUDE FILES
+// =============================================================================
+
+async function createClaudeMd(config: SetupConfig): Promise<void> {
+  header('Creating CLAUDE.md Files');
+
+  // .claude/CLAUDE.md - Project rules
+  const _projectClaudeMd = `# ${config.projectName} - Project Rules
+
+## Project Overview
+
+Shopify theme development project using Custom Elements + Section Registry pattern.
+
+- **Styling**: ${config.stylingApproach.toUpperCase()}${config.stylingApproach === 'tailwind' ? ' (using @apply, NOT inline utilities)' : ''}
+- **JavaScript**: ${config.jsApproach === 'typescript' ? 'TypeScript' : 'Vanilla JavaScript'}
+- **Package Manager**: ${config.packageManager}
+- **Build**: Vite + vite-plugin-shopify
+
+---
+
+## Critical Rules
+
+### Build Commands
+- **MUST NOT** run \`${config.packageManager} run build\` unless explicitly requested
+- **MUST NOT** run \`shopify theme push\` unless explicitly requested
+
+### Code Style
+
+#### Naming Conventions
+- **MUST** prefix function-scoped variables with underscore: \`_element\`, \`_data\`
+- **MUST** use PascalCase for classes: \`FeaturedCollection\`, \`ProductCard\`
+- **MUST** use camelCase for functions: \`handleClick\`, \`initializeApp\`
+- **MUST** use UPPER_SNAKE_CASE for constants: \`BREAKPOINTS\`, \`ANIMATION\`
+
+#### Early Returns
+- **MUST** use guard clauses at the start of functions
+- **MUST NOT** nest conditions more than 2 levels deep
+
+\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
+// Correct: Guard clauses first
+_handleClick(event) {
+  const _target = event.target;
+
+  if (!_target) return;
+  if (!_target.dataset.productId) return;
+  if (this._isLoading) return;
+
+  // Main logic here
+  this._loadProduct(_target.dataset.productId);
+}
+
+// Wrong: Nested conditions
+_handleClick(event) {
+  if (event.target) {
+    if (event.target.dataset.productId) {
+      if (!this._isLoading) {
+        // Too nested
+      }
+    }
+  }
+}
+\`\`\`
+
+### Logging
+- **MUST** use \`consoleMessage()\` utility, never \`console.log\` directly
+- Logging respects \`window.${config.projectNameSafe}.settings.devMode\`
+
+### Custom Elements
+- **MUST** check \`customElements.get()\` before registering
+- **MUST** implement \`connectedCallback()\` and \`disconnectedCallback()\`
+- **MUST** clean up event listeners in \`disconnectedCallback()\`
+
+### State Classes
+- Use \`.is-active\`, \`.is-loading\`, \`.is-hidden\`, \`.is-open\`
+- Never use \`.active\`, \`.loading\`, \`.hidden\` (too generic)
+
+---
+
+## File Locations
+
+| Type | Location |
+|------|----------|
+| Section components | \`frontend/scripts/components/sections/\` |
+| Shared components | \`frontend/scripts/components/shared/\` |
+| Utilities | \`frontend/scripts/utils/\` |
+| Constants | \`frontend/scripts/constants/\` |
+| Types | \`frontend/scripts/types/\` |
+| Section styles | \`frontend/styles/sections/\` |
+| Component styles | \`frontend/styles/components/\` |
+
+---
+
+## Global Object
+
+Access via \`window.${config.projectNameSafe}\`:
+
+\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
+window.${config.projectNameSafe}.settings.devMode  // boolean
+window.${config.projectNameSafe}.theme.currency    // string
+window.${config.projectNameSafe}.cart.count        // number
+window.${config.projectNameSafe}.events            // EventTarget
+\`\`\`
+
+---
+
+## Events
+
+Dispatch events via:
+\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
+import { dispatchStoreEvent } from '@/utils';
+
+dispatchStoreEvent('cart:updated', { count: 5 });
+\`\`\`
+
+Subscribe to events:
+\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
+import { subscribeToStoreEvent } from '@/utils';
+
+const unsubscribe = subscribeToStoreEvent('cart:updated', (event) => {
+  console.log(event.detail.count);
+});
+
+// Later: unsubscribe();
+\`\`\`
+
+---
+
+## Quick Commands
+
+\`\`\`bash
+${config.packageManager} run dev       # Start development
+${config.packageManager} run build     # Build assets
+${config.packageManager} run deploy    # Deploy to Shopify
+\`\`\`
+`;
+
+  await mkdir('.claude', { recursive: true });
+  await writeFile('.claude/CLAUDE.md', _projectClaudeMd);
+  log('Created: .claude/CLAUDE.md', colors.green);
+
+  // frontend/CLAUDE.md - Frontend development guide
+  const _frontendClaudeMd = `# Frontend Development Guide
+
+## Custom Element Pattern
+
+All section components are Custom Elements that extend \`HTMLElement\`.
+
+### Basic Structure
+
+\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
+export class MySection extends HTMLElement {
+  // Cache DOM references (prefix with _)
+  _container = null;
+  _button = null;
+
+  // State (prefix with _)
+  _isInitialized = false;
+  _isLoading = false;
+
+  // Lifecycle: element added to DOM
+  connectedCallback() {
+    if (this._isInitialized) return;
+    this._init();
+  }
+
+  // Lifecycle: element removed from DOM
+  disconnectedCallback() {
+    this._destroy();
+  }
+
+  _init() {
+    this._cacheElements();
+    if (!this._container) return; // Guard clause
+    this._bindEvents();
+    this._isInitialized = true;
+  }
+
+  _cacheElements() {
+    this._container = this.querySelector('.my-section__container');
+    this._button = this.querySelector('.my-section__button');
+  }
+
+  _bindEvents() {
+    this._button?.addEventListener('click', this._handleClick);
+  }
+
+  _destroy() {
+    this._button?.removeEventListener('click', this._handleClick);
+    this._container = null;
+    this._button = null;
+    this._isInitialized = false;
+  }
+
+  // Arrow function to preserve 'this'
+  _handleClick = (event) => {
+    const _target = event.target;
+    if (!_target) return;
+    // Handle click
+  };
+}
+\`\`\`
+
+### Registration
+
+Register in \`sectionRegistry.${config.jsApproach === 'typescript' ? 'ts' : 'js'}\`:
+
+\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
+import { MySection } from '@/components/sections/my-section';
+
+registerSection('my-section', 'my-section', MySection, {
+  onBlockSelect: (event) => {
+    // Scroll to selected block in Theme Editor
+  },
+});
+\`\`\`
+
+### Liquid Template
+
+\`\`\`liquid
+<my-section
+  data-section-id="{{ section.id }}"
+  data-section-type="my-section"
+  data-config='{ "autoplay": {{ section.settings.autoplay }} }'
+>
+  <div class="my-section__container">
+    {% for block in section.blocks %}
+      <div class="my-section__item" {{ block.shopify_attributes }}>
+        ...
+      </div>
+    {% endfor %}
+  </div>
+</my-section>
+\`\`\`
+
+---
+
+## Theme Editor Integration
+
+The Section Registry handles these Shopify events:
+
+| Event | When Fired |
+|-------|------------|
+| \`shopify:section:load\` | Section added or settings changed |
+| \`shopify:section:unload\` | Section removed |
+| \`shopify:section:select\` | Section clicked in editor |
+| \`shopify:section:deselect\` | Section deselected |
+| \`shopify:block:select\` | Block clicked in editor |
+| \`shopify:block:deselect\` | Block deselected |
+
+Use callbacks when registering:
+
+\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
+registerSection('featured-collection', 'featured-collection', FeaturedCollection, {
+  onBlockSelect: (event) => {
+    const _blockId = event.detail.blockId;
+    // Scroll to block, highlight it, open accordion, etc.
+  },
+  onBlockDeselect: (event) => {
+    // Remove highlight
+  },
+});
+\`\`\`
+
+---
+
+## Styling${config.stylingApproach === 'scss' ? ' (SCSS)' : config.stylingApproach === 'tailwind' ? ' (Tailwind @apply)' : ' (CSS)'}
+
+### Mobile-First
+
+Always start with mobile styles, use media queries for larger screens.
+
+${config.stylingApproach === 'scss' ? `\`\`\`scss
+.product-card {
+  padding: spacing('sm');  // Mobile
+
+  @include min('md') {
+    padding: spacing('md');  // Tablet+
+  }
+
+  @include min('lg') {
+    padding: spacing('lg');  // Desktop+
+  }
+}
+\`\`\`` : config.stylingApproach === 'tailwind' ? `\`\`\`css
+/* Use @apply in CSS files, NOT inline in Liquid */
+.product-card {
+  @apply p-2;  /* Mobile */
+
+  @screen md {
+    @apply p-4;  /* Tablet+ */
+  }
+
+  @screen lg {
+    @apply p-8;  /* Desktop+ */
+  }
+}
+\`\`\`` : `\`\`\`css
+.product-card {
+  padding: var(--spacing-sm);  /* Mobile */
+}
+
+@media (min-width: 768px) {
+  .product-card {
+    padding: var(--spacing-md);  /* Tablet+ */
+  }
+}
+
+@media (min-width: 1024px) {
+  .product-card {
+    padding: var(--spacing-lg);  /* Desktop+ */
+  }
+}
+\`\`\``}
+
+### BEM Naming
+
+\`\`\`${config.stylingApproach === 'scss' ? 'scss' : 'css'}
+.product-card {           /* Block */
+  &__image { }            /* Element */
+  &__title { }
+  &__price { }
+  &--featured { }         /* Modifier */
+  &.is-loading { }        /* State */
+}
+\`\`\`
+
+---
+
+## Pre-Flight Checklist
+
+Before committing:
+
+- [ ] Custom Element has \`connectedCallback\` and \`disconnectedCallback\`
+- [ ] All event listeners are removed in \`disconnectedCallback\`
+- [ ] Guard clauses used for early returns
+- [ ] Variables prefixed with \`_\` (function scope)
+- [ ] Logging uses \`consoleMessage()\`
+- [ ] Mobile-first styles
+- [ ] Tested in Theme Editor (block select/deselect)
+`;
+
+  await writeFile('frontend/CLAUDE.md', _frontendClaudeMd);
+  log('Created: frontend/CLAUDE.md', colors.green);
+}
+
+async function createAgents(config: SetupConfig): Promise<void> {
+  header('Creating Claude Agents');
+
+  // ui-design agent
+  const _uiDesignAgent = `# UI Design Agent
+
+You are a UI/UX design specialist for Shopify theme development.
+
+## Expertise
+
+- ${config.stylingApproach === 'scss' ? 'SCSS with design tokens and mixins' : config.stylingApproach === 'tailwind' ? 'Tailwind CSS using @apply directives (NOT inline utilities)' : 'CSS with custom properties'}
+- Mobile-first responsive design
+- BEM naming conventions
+- Semantic class names (no utility classes in markup)
+- Animation with CSS transitions (respect prefers-reduced-motion)
+- Color accessibility (WCAG contrast ratios)
+
+## Key Rules
+
+1. **Mobile-first**: Always start with mobile styles
+2. **Semantic names**: \`.product-card__title\` not \`.text-lg.font-bold\`
+3. **State classes**: Use \`.is-active\`, \`.is-loading\`, \`.is-hidden\`
+4. **Animations**: CSS transitions only, respect reduced motion
+5. **Performance**: Avoid animating width/height, use transform/opacity
+
+${config.stylingApproach === 'scss' ? `## SCSS Patterns
+
+\`\`\`scss
+// Use design tokens
+.component {
+  padding: spacing('md');
+  color: color('text');
+  transition: transition('base');
+
+  @include min('md') {
+    padding: spacing('lg');
+  }
+}
+\`\`\`` : config.stylingApproach === 'tailwind' ? `## Tailwind @apply Patterns
+
+\`\`\`css
+/* CORRECT: @apply in CSS files */
+.product-card {
+  @apply flex flex-col gap-4 p-4;
+  @apply bg-white rounded-lg shadow-sm;
+  @apply transition-shadow duration-200;
+}
+
+/* WRONG: Inline utilities in Liquid */
+<div class="flex flex-col gap-4 p-4">  <!-- NO -->
+\`\`\`` : `## CSS Patterns
+
+\`\`\`css
+.component {
+  padding: var(--spacing-md);
+  transition: var(--transition-base);
+}
+
+@media (min-width: 768px) {
+  .component {
+    padding: var(--spacing-lg);
+  }
+}
+\`\`\``}
+
+## Reduced Motion
+
+\`\`\`${config.stylingApproach === 'scss' ? 'scss' : 'css'}
+@media (prefers-reduced-motion: reduce) {
+  .animated-element {
+    animation: none;
+    transition: none;
+  }
+}
+\`\`\`
+`;
+
+  await writeFile('.claude/agents/ui-design.md', _uiDesignAgent);
+  log('Created: .claude/agents/ui-design.md', colors.green);
+
+  // code-writer agent
+  const _codeWriterAgent = `# Code Writer Agent
+
+You are a ${config.jsApproach === 'typescript' ? 'TypeScript' : 'JavaScript'} specialist for Shopify theme development.
+
+## Expertise
+
+- Custom Elements (Web Components)
+- Section Registry pattern
+- Shopify Theme Editor integration
+- Event-driven architecture
+- Performance optimization
+
+## Key Rules
+
+### Naming
+- Prefix function-scoped variables: \`_element\`, \`_data\`, \`_config\`
+- PascalCase for classes: \`FeaturedCollection\`
+- camelCase for methods: \`handleClick\`
+
+### Early Returns
+\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
+// CORRECT
+_handleClick(event) {
+  const _target = event.target;
+  if (!_target) return;
+  if (!_target.dataset.id) return;
+
+  // Main logic
+}
+
+// WRONG - too nested
+_handleClick(event) {
+  if (event.target) {
+    if (event.target.dataset.id) {
+      // Main logic
+    }
+  }
+}
+\`\`\`
+
+### Custom Element Structure
+\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
+export class MyComponent extends HTMLElement {
+  _container = null;
+  _isInitialized = false;
+
+  connectedCallback() {
+    if (this._isInitialized) return;
+    this._init();
+  }
+
+  disconnectedCallback() {
+    this._destroy();
+  }
+
+  _init() {
+    this._cacheElements();
+    this._bindEvents();
+    this._isInitialized = true;
+  }
+
+  _destroy() {
+    // MUST remove all event listeners
+    this._container = null;
+    this._isInitialized = false;
+  }
+
+  // Arrow function preserves 'this'
+  _handleClick = (event) => { };
+}
+\`\`\`
+
+### Logging
+- ALWAYS use \`consoleMessage()\` from \`@/utils\`
+- NEVER use \`console.log\` directly
+
+### Events
+- Dispatch: \`dispatchStoreEvent('cart:updated', { count: 5 })\`
+- Subscribe: \`subscribeToStoreEvent('cart:updated', handler)\`
+`;
+
+  await writeFile('.claude/agents/code-writer.md', _codeWriterAgent);
+  log('Created: .claude/agents/code-writer.md', colors.green);
+
+  // liquid agent
+  const _liquidAgent = `# Liquid Agent
+
+You are a Shopify Liquid template specialist.
+
+## Expertise
+
+- Liquid syntax and filters
+- Section and block architecture
+- Schema configuration
+- Metafields and metaobjects
+- Performance optimization
+
+## Key Rules
+
+### Section Structure
+\`\`\`liquid
+{% comment %} sections/my-section.liquid {% endcomment %}
+
+<my-section
+  data-section-id="{{ section.id }}"
+  data-section-type="my-section"
+  data-config='{ "setting": {{ section.settings.value | json }} }'
+>
+  <div class="my-section">
+    {% for block in section.blocks %}
+      {%- case block.type -%}
+        {%- when 'item' -%}
+          <div class="my-section__item" {{ block.shopify_attributes }}>
+            {{ block.settings.title }}
+          </div>
+      {%- endcase -%}
+    {% endfor %}
+  </div>
+</my-section>
+
+{% schema %}
+{
+  "name": "My Section",
+  "settings": [],
+  "blocks": [
+    {
+      "type": "item",
+      "name": "Item",
+      "settings": [
+        {
+          "type": "text",
+          "id": "title",
+          "label": "Title"
+        }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "My Section"
+    }
+  ]
+}
+{% endschema %}
+\`\`\`
+
+### Custom Element Tags
+- Use Custom Element tag as section wrapper
+- Include \`data-section-id\` and \`data-section-type\`
+- Pass config via \`data-config\` JSON attribute
+- Add \`{{ block.shopify_attributes }}\` to blocks for Theme Editor
+
+### Performance
+- Avoid N+1 queries in loops
+- Use \`| json\` filter for JS data
+- Lazy load images with \`loading="lazy"\`
+- Use Shopify's image_url for responsive images
+
+### Image Optimization
+\`\`\`liquid
+{{ image | image_url: width: 800 | image_tag:
+  loading: 'lazy',
+  widths: '375, 750, 1100, 1500',
+  sizes: '(min-width: 1024px) 50vw, 100vw'
+}}
+\`\`\`
+`;
+
+  await writeFile('.claude/agents/liquid.md', _liquidAgent);
+  log('Created: .claude/agents/liquid.md', colors.green);
+
+  // accessibility agent
+  const _accessibilityAgent = `# Accessibility Agent
+
+You are a web accessibility specialist for Shopify themes.
+
+## Expertise
+
+- WCAG 2.1 AA compliance
+- Keyboard navigation
+- Screen reader compatibility
+- Focus management
+- ARIA attributes
+
+## Key Rules
+
+### Focus Management
+\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
+// Trap focus in modals
+_trapFocus(container) {
+  const _focusable = container.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  );
+  const _first = _focusable[0];
+  const _last = _focusable[_focusable.length - 1];
+
+  container.addEventListener('keydown', (event) => {
+    if (event.key !== 'Tab') return;
+
+    if (event.shiftKey && document.activeElement === _first) {
+      event.preventDefault();
+      _last.focus();
+    } else if (!event.shiftKey && document.activeElement === _last) {
+      event.preventDefault();
+      _first.focus();
+    }
+  });
+}
+\`\`\`
+
+### Interactive Elements
+- All interactive elements must be keyboard accessible
+- Provide visible focus states (\`:focus-visible\`)
+- Buttons for actions, links for navigation
+- Never remove focus outline without replacement
+
+### ARIA
+\`\`\`html
+<!-- Expandable content -->
+<button aria-expanded="false" aria-controls="content-id">
+  Toggle
+</button>
+<div id="content-id" hidden>Content</div>
+
+<!-- Live regions for dynamic updates -->
+<div aria-live="polite" aria-atomic="true">
+  Cart updated: 5 items
+</div>
+\`\`\`
+
+### Reduced Motion
+\`\`\`${config.stylingApproach === 'scss' ? 'scss' : 'css'}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+\`\`\`
+
+### Color Contrast
+- Text must have 4.5:1 contrast ratio (AA)
+- Large text (18px+) can have 3:1 ratio
+- Never convey information by color alone
+
+### Forms
+- All inputs need visible labels
+- Error messages must be associated with inputs
+- Use \`aria-describedby\` for help text
+- Group related inputs with fieldset/legend
+`;
+
+  await writeFile('.claude/agents/accessibility.md', _accessibilityAgent);
+  log('Created: .claude/agents/accessibility.md', colors.green);
+}
+
+// =============================================================================
+// THEME OPERATIONS
+// =============================================================================
+
+async function pullTheme(config: SetupConfig): Promise<void> {
   if (!config.themeId) {
-    log("\nSkipping theme pull - no theme selected", colors.yellow);
+    log('\nSkipping theme pull - no theme selected', colors.yellow);
     return;
   }
 
-  header("Pulling Shopify Theme");
+  header('Pulling Shopify Theme');
 
   try {
-    log(`Pulling theme ${config.themeId} to ${config.shopifyEnvironment} environment...`, colors.cyan);
-    await $`shopify theme pull --theme ${config.themeId} --environment ${config.shopifyEnvironment}`;
-    log("✓ Theme pulled successfully", colors.green);
-  } catch (error) {
-    log("✗ Error pulling theme", colors.red);
-    console.error(error);
+    log(`Pulling theme ${config.themeId}...`, colors.cyan);
+    await $`shopify theme pull --theme ${config.themeId} --environment ${config.environmentName}`;
+    log('Theme pulled successfully', colors.green);
+
+    // Scan theme for events
+    const _scanResult = await scanThemeForEvents('.');
+    displayThemeScanResults(_scanResult);
+  } catch (_error) {
+    log('Error pulling theme', colors.red);
+    console.error(_error);
   }
 }
 
-async function initializeGit() {
-  header("Initializing Git Repository");
+async function runInitialBuild(config: SetupConfig): Promise<void> {
+  header('Running Initial Build');
 
   try {
-    // Check if git is already initialized
-    try {
-      await $`git rev-parse --git-dir`.quiet();
-      log("Git repository already initialized", colors.yellow);
-      return;
-    } catch {
-      // Not a git repo, continue
-    }
+    log('Building assets...', colors.cyan);
 
-    await $`git init`;
-    await $`git add .`;
-    await $`git commit -m "Initial commit: Shopify theme setup"`;
-    log("✓ Git repository initialized", colors.green);
-  } catch (error) {
-    log("✗ Error initializing git", colors.red);
-    console.error(error);
-  }
-}
-
-async function runInitialBuild(config: SetupConfig) {
-  header("Running Initial Build");
-
-  try {
-    log("Building Vite assets for the first time...", colors.cyan);
-
-    if (config.packageManager === "bun") {
+    if (config.packageManager === 'bun') {
       await $`bun run build`;
-    } else if (config.packageManager === "npm") {
-      await $`npm run build`;
-    } else if (config.packageManager === "pnpm") {
-      await $`pnpm run build`;
     } else {
       await $`yarn build`;
     }
 
-    log("✓ Initial build completed successfully", colors.green);
-  } catch (error) {
-    log("✗ Error during build", colors.red);
-    console.error(error);
+    log('Build completed successfully', colors.green);
+  } catch (_error) {
+    log('Build failed - you may need to fix errors first', colors.yellow);
   }
 }
 
-async function updateClaudeMd(config: SetupConfig) {
-  header("Updating CLAUDE.md with Project Context");
+// =============================================================================
+// FINALIZATION
+// =============================================================================
 
-  // Read existing CLAUDE.md
-  const { readFile } = await import("node:fs/promises");
-  const existingContent = await readFile("CLAUDE.md", "utf-8");
+function displayNextSteps(config: SetupConfig): void {
+  header('Setup Complete!');
 
-  // Create project-specific section
-  const projectContext = `
+  log('Your Shopify theme development environment is ready.\n', colors.green);
 
----
-
-## Project-Specific Context
-
-**Project Name**: ${config.projectName}
-**Store Type**: ${config.projectType || "e-commerce"}
-**Description**: ${config.projectDescription || "Shopify theme development project"}
-
-### Configuration
-
-- **Styling Approach**: ${config.stylingApproach}
-- **JavaScript**: ${config.jsApproach === "vanilla" ? "Vanilla JavaScript" : "TypeScript"}
-- **Package Manager**: ${config.packageManager}
-- **Theme Editor Setup**: ${config.enableTunnel ? "Cloudflare tunnel enabled (Vite 6.0.8)" : "Manual HTTPS configuration required"}
-- **Environment**: ${config.shopifyEnvironment}
-
-### Project-Specific Notes
-
-${config.projectDescription ? `This project is ${config.projectDescription}.` : ""}
-
-${config.enableTunnel ? `
-**Important**: This project uses Cloudflare tunnel for theme editor development. Make sure cloudflared is installed:
-\`\`\`bash
-brew install cloudflared
-\`\`\`
-
-When running \`${config.packageManager} run dev\`, the tunnel will automatically create an HTTPS URL for testing in the Shopify theme editor.
-` : ""}
-
-${config.stylingApproach === "tailwind" ? `
-**Note**: This project uses Tailwind CSS. While the default guidelines emphasize semantic class names, you may use utility classes if that's the project's chosen approach. Ensure mobile-first responsive design principles are still followed.
-` : ""}
-
-### Quick Start Commands
-
-\`\`\`bash
-# Start development
-${config.packageManager} run dev
-
-# Build assets
-${config.packageManager} run build
-
-# Deploy to Shopify
-${config.packageManager} run deploy
-\`\`\`
-
----
-
-*This project context section is auto-generated. Update it as the project evolves.*
-`;
-
-  // Append to existing content
-  const updatedContent = existingContent + projectContext;
-
-  await writeFile("CLAUDE.md", updatedContent);
-  log("✓ CLAUDE.md updated with project-specific context", colors.green);
-}
-
-async function displayNextSteps(config: SetupConfig) {
-  header("Setup Complete!");
-
-  log("Your Shopify theme development environment is ready!", colors.green);
-  log("\nNext steps:\n", colors.bright);
-
-  if (config.enableTunnel) {
-    log("⚠️  IMPORTANT: Install cloudflared for tunnel support:", colors.yellow);
-    log("   brew install cloudflared\n", colors.yellow);
-  }
-
-  log("1. Start the development server:", colors.cyan);
-  log(`   ${config.packageManager} run dev`, colors.yellow);
-  if (config.enableTunnel) {
-    log("   (This will create a Cloudflare tunnel for theme editor testing)", colors.bright);
-  }
+  log('Next steps:', colors.bright);
   console.log();
 
-  log("2. Build for production:", colors.cyan);
-  log(`   ${config.packageManager} run build\n`, colors.yellow);
+  log('1. Start development:', colors.cyan);
+  log(`   ${config.packageManager} run dev`, colors.yellow);
+  console.log();
 
-  log("3. Deploy to Shopify:", colors.cyan);
-  log(`   ${config.packageManager} run deploy\n`, colors.yellow);
+  log('2. Build assets:', colors.cyan);
+  log(`   ${config.packageManager} run build`, colors.yellow);
+  console.log();
 
-  log("4. Read the documentation:", colors.cyan);
-  log("   - CLAUDE.md for project guidelines and AI assistant rules", colors.yellow);
-  log("   - README.md for comprehensive documentation\n", colors.yellow);
+  log('3. Deploy to Shopify:', colors.cyan);
+  log(`   ${config.packageManager} run deploy`, colors.yellow);
+  console.log();
 
-  log("5. Commit your changes:", colors.cyan);
-  log("   git add .", colors.yellow);
-  log(`   git commit -m "feat: Initial Shopify theme setup for ${config.projectName}"`, colors.yellow);
-  log("   git push\n", colors.yellow);
+  log('4. Read the documentation:', colors.cyan);
+  log('   - .claude/CLAUDE.md (project rules)', colors.dim);
+  log('   - frontend/CLAUDE.md (frontend guide)', colors.dim);
+  console.log();
 
-  log("Happy coding! 🚀", colors.green + colors.bright);
+  log('Happy coding!', colors.green + colors.bright);
 }
 
-// Main execution
-async function main() {
+// =============================================================================
+// MAIN
+// =============================================================================
+
+async function main(): Promise<void> {
   try {
-    const config = await askQuestions();
+    const _config = await askQuestions();
 
-    // Confirm before proceeding
-    log("\n" + "=".repeat(60), colors.bright);
-    log("Configuration Summary:", colors.bright + colors.cyan);
-    log("=".repeat(60), colors.bright);
-    log(`Project Name: ${config.projectName}`, colors.cyan);
-    log(`Styling: ${config.stylingApproach}`, colors.cyan);
-    log(`JavaScript: ${config.jsApproach}`, colors.cyan);
-    log(`Package Manager: ${config.packageManager}`, colors.cyan);
-    log(`Store Config: ${config.tomlApproach === "file" ? "shopify.theme.toml" : config.tomlApproach === "cli" ? "CLI authentication" : "Manual setup"}`, colors.cyan);
-    if (config.storeUrl) {
-      log(`Store URL: ${config.storeUrl}`, colors.cyan);
-    }
-    log(`Linting: ${config.lintingSetup === "eslint-prettier" ? "ESLint + Prettier" : config.lintingSetup === "theme-check" ? "Theme Check" : "None"}`, colors.cyan);
-    log(`Git Hooks: ${config.gitHooks ? "Yes (husky + lint-staged)" : "No"}`, colors.cyan);
-    log(`Environment: ${config.shopifyEnvironment}`, colors.cyan);
-    if (config.themeId) {
-      log(`Theme ID: ${config.themeId}`, colors.cyan);
-    }
-    log("=".repeat(60) + "\n", colors.bright);
+    // Confirmation
+    subheader('Configuration Summary');
+    log(`Project: ${_config.projectName}`, colors.cyan);
+    log(`Styling: ${_config.stylingApproach}`, colors.cyan);
+    log(`JavaScript: ${_config.jsApproach}`, colors.cyan);
+    log(`Package Manager: ${_config.packageManager}`, colors.cyan);
+    log(`Store: ${_config.storeUrl || '(not configured)'}`, colors.cyan);
+    log(`Theme: ${_config.themeId || '(not selected)'}`, colors.cyan);
+    console.log();
 
-    const confirm = await prompt("Proceed with setup? (y/n):");
-    if (confirm.toLowerCase() !== "y" && confirm.toLowerCase() !== "yes") {
-      log("Setup cancelled.", colors.yellow);
+    const _confirm = await prompt('Proceed with setup? (y/n):');
+    if (_confirm.toLowerCase() !== 'y' && _confirm.toLowerCase() !== 'yes') {
+      log('Setup cancelled.', colors.yellow);
       process.exit(0);
     }
 
-    // Run setup steps
-    await createPackageJson(config);
-    await installDependencies(config);
-    await createDirectoryStructure();
-    await createViteConfig(config);
-    await createPostCSSConfig(config);
+    // Run setup
+    await createPackageJson(_config);
+    await installDependencies(_config);
+    await createDirectoryStructure(_config);
+    await createViteConfig(_config);
+    await createPostCSSConfig(_config);
+    await createTailwindConfig(_config);
+    await createTypeScriptConfig(_config);
+    await createShopifyThemeToml(_config);
     await createGitIgnore();
     await createShopifyIgnore();
-    await createGitHubWorkflow(config);
-    await createEntrypoints(config);
-    await createCoreFiles();
-    await createShopifyThemeToml(config);
-    await setupLinting(config);
-    await setupGitHooks(config);
-    await pullShopifyTheme(config);
-    await runInitialBuild(config);
-    await updateClaudeMd(config);
-    await initializeGit();
-    // IMPORTANT: Add .toml to gitignore as the LAST step to protect credentials
-    await addTomlToGitignore();
-    await displayNextSteps(config);
+    await createGitHubWorkflow(_config);
+    await createEntrypoints(_config);
+    await createUtilities(_config);
+    await createConstants(_config);
+    await createSectionRegistry(_config);
+    await createExampleSection(_config);
+    await createClaudeMd(_config);
+    await createAgents(_config);
+    await pullTheme(_config);
+    await runInitialBuild(_config);
 
-  } catch (error) {
-    log("\n✗ Setup failed with error:", colors.red);
-    console.error(error);
+    displayNextSteps(_config);
+  } catch (_error) {
+    log('\nSetup failed:', colors.red);
+    console.error(_error);
     process.exit(1);
   }
 }
