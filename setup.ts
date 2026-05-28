@@ -14,6 +14,7 @@
 import { $ } from 'bun';
 import { readdir, mkdir, writeFile, readFile, stat } from 'node:fs/promises';
 import { join, basename } from 'node:path';
+import * as readline from 'node:readline';
 
 // =============================================================================
 // TERMINAL COLORS & UTILITIES
@@ -47,26 +48,17 @@ function subheader(message: string): void {
   console.log('─'.repeat(60) + '\n');
 }
 
-async function prompt(question: string): Promise<string> {
-  process.stdout.write(`${colors.yellow}${question}${colors.reset} `);
+const _rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
 
-  const _reader = Bun.stdin.stream().getReader();
-  let _result = '';
-
-  while (true) {
-    const { value, done } = await _reader.read();
-    if (done) break;
-
-    const _text = new TextDecoder().decode(value);
-    if (_text.includes('\n')) {
-      _result += _text.replace('\n', '').replace('\r', '');
-      break;
-    }
-    _result += _text;
-  }
-
-  _reader.releaseLock();
-  return _result.trim();
+function prompt(question: string): Promise<string> {
+  return new Promise((_resolve) => {
+    _rl.question(`${colors.yellow}${question}${colors.reset} `, (_answer) => {
+      _resolve(_answer.trim());
+    });
+  });
 }
 
 async function select(question: string, options: string[]): Promise<number> {
@@ -97,6 +89,7 @@ interface SetupConfig {
   jsApproach: 'typescript' | 'vanilla';
   packageManager: 'bun' | 'yarn';
   storeUrl: string;
+  storePassword: string;
   environmentName: string;
   themeId: string | null;
 }
@@ -118,13 +111,43 @@ interface ThemeScanResult {
 // SHOPIFY HELPERS
 // =============================================================================
 
-async function getShopifyThemes(): Promise<ThemeInfo[]> {
+async function getShopifyThemes(storeUrl: string, password: string): Promise<ThemeInfo[]> {
   try {
-    const _result = await $`shopify theme list --json`.text();
-    return JSON.parse(_result);
-  } catch {
+    const _response = await fetch(
+      `https://${storeUrl}/admin/api/2024-10/themes.json`,
+      {
+        headers: {
+          'Authorization': `Basic ${btoa(`:${password}`)}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    if (!_response.ok) {
+      throw new Error(`HTTP ${_response.status}: ${_response.statusText}`);
+    }
+
+    const _data = await _response.json() as { themes: Array<{ id: number; name: string; role: string }> };
+    return _data.themes.map((_t) => ({
+      id: String(_t.id),
+      name: _t.name,
+      role: _t.role,
+    }));
+  } catch (_err) {
+    log(`Failed to fetch themes: ${_err}`, colors.red);
     return [];
   }
+}
+
+function parseStoreUrl(input: string): string {
+  // Handle: https://admin.shopify.com/store/my-store/themes → my-store.myshopify.com
+  const _adminMatch = input.match(/admin\.shopify\.com\/store\/([^/]+)/);
+  if (_adminMatch) return `${_adminMatch[1]}.myshopify.com`;
+
+  // Handle: my-store → my-store.myshopify.com
+  if (!input.includes('.myshopify.com')) return `${input.trim()}.myshopify.com`;
+
+  return input.trim();
 }
 
 async function scanThemeForEvents(themePath: string): Promise<ThemeScanResult> {
@@ -313,29 +336,36 @@ async function askQuestions(): Promise<SetupConfig> {
   subheader('Package Manager');
 
   const _pmChoice = await select('Which package manager?', [
-    'Bun (Recommended - 3-10x faster)',
-    'Yarn',
+    'Yarn (Recommended)',
+    'Bun',
   ]);
-  const _packageManager: SetupConfig['packageManager'] = _pmChoice === 0 ? 'bun' : 'yarn';
+  const _packageManager: SetupConfig['packageManager'] = _pmChoice === 0 ? 'yarn' : 'bun';
 
   // Question 5: Shopify Store Configuration
   subheader('Shopify Store Configuration');
 
   log('Creating shopify.theme.toml for store credentials.\n', colors.dim);
+  log('Tip: You can paste your Shopify admin URL directly:', colors.dim);
+  log('     https://admin.shopify.com/store/your-store/themes\n', colors.dim);
 
-  const _storeUrl = await prompt('Store URL (e.g., your-store.myshopify.com):');
-  let _normalizedStoreUrl = _storeUrl.trim();
-  if (_normalizedStoreUrl && !_normalizedStoreUrl.includes('.myshopify.com')) {
-    _normalizedStoreUrl = _normalizedStoreUrl + '.myshopify.com';
+  const _storeInput = await prompt('Store URL or admin URL:');
+  const _normalizedStoreUrl = parseStoreUrl(_storeInput);
+
+  if (_normalizedStoreUrl) {
+    log(`Store: ${_normalizedStoreUrl}`, colors.green);
   }
+
+  log('\nTheme Access Token is required to fetch your themes.', colors.dim);
+  log('Get it from: Shopify Admin → Settings → Apps and sales channels → Develop apps\n', colors.dim);
+  const _storePassword = await prompt('Theme Access Token:');
 
   const _environmentName = (await prompt('Environment name (default: development):')) || 'development';
 
   let _themeId: string | null = null;
 
-  if (_normalizedStoreUrl) {
+  if (_normalizedStoreUrl && _storePassword) {
     log('\nFetching themes from store...', colors.cyan);
-    const _themes = await getShopifyThemes();
+    const _themes = await getShopifyThemes(_normalizedStoreUrl, _storePassword);
 
     if (_themes.length > 0) {
       log('', colors.reset);
@@ -351,9 +381,11 @@ async function askQuestions(): Promise<SetupConfig> {
         log(`\nSelected: ${_themes[_themeChoice].name}`, colors.green);
       }
     } else {
-      log('Could not fetch themes. Run "shopify auth login" first.', colors.yellow);
+      log('Could not fetch themes. Check your store URL and access password.', colors.yellow);
       log('You can configure the theme ID manually in shopify.theme.toml\n', colors.dim);
     }
+  } else {
+    log('Skipping theme fetch — store URL or password not provided.', colors.yellow);
   }
 
   return {
@@ -363,6 +395,7 @@ async function askQuestions(): Promise<SetupConfig> {
     jsApproach: _jsApproach,
     packageManager: _packageManager,
     storeUrl: _normalizedStoreUrl,
+    storePassword: _storePassword,
     environmentName: _environmentName,
     themeId: _themeId,
   };
@@ -400,13 +433,13 @@ async function createDirectoryStructure(config: SetupConfig): Promise<void> {
 async function createPackageJson(config: SetupConfig): Promise<void> {
   header('Creating package.json');
 
-  const _runCmd = config.packageManager === 'bun' ? 'bun run' : 'yarn';
+  const _runCmd = config.packageManager === 'yarn' ? 'yarn' : 'bun run';
 
   const _packageJson = {
     name: `${config.projectName}-theme`,
     version: '1.0.0',
     type: 'module',
-    packageManager: config.packageManager === 'bun' ? 'bun@1.2.0' : undefined,
+    packageManager: config.packageManager === 'yarn' ? 'yarn@1.22.22' : 'bun@1.2.0',
     scripts: {
       dev: 'run-p -sr "shopify:dev" "vite:dev"',
       build: `${_runCmd} vite:build`,
@@ -476,7 +509,7 @@ async function installDependencies(config: SetupConfig): Promise<void> {
 async function createViteConfig(config: SetupConfig): Promise<void> {
   header('Creating Vite Configuration');
 
-  const _scssConfig =
+  const _scssPreprocessor =
     config.stylingApproach === 'scss'
       ? `
     preprocessorOptions: {
@@ -484,6 +517,9 @@ async function createViteConfig(config: SetupConfig): Promise<void> {
         additionalData: '@use "sass:math"; @use "sass:map";',
         api: 'modern-compiler',
         quietDeps: true,
+        logger: {
+          warn: () => { }
+        }
       }
     }`
       : '';
@@ -491,14 +527,54 @@ async function createViteConfig(config: SetupConfig): Promise<void> {
   const _viteConfig = `import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 import shopify from 'vite-plugin-shopify';
+import { readFileSync, unlinkSync } from 'node:fs';
+import path from 'node:path';
 
-export default defineConfig({
+const ASSETS_DIR = path.resolve('./assets');
+const MANIFEST_PATH = path.join(ASSETS_DIR, '.vite', 'manifest.json');
+
+/**
+ * Deletes all files previously emitted by Vite (tracked in manifest.json).
+ * Non-Vite theme assets (theme.js, vendor.js, etc.) are untouched.
+ */
+function cleanViteAssets() {
+  return {
+    name: 'clean-vite-assets',
+    buildStart() {
+      let manifest;
+      try {
+        manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8'));
+      } catch {
+        return; // No previous manifest — first build
+      }
+
+      const filesToDelete = new Set(
+        Object.values(manifest).flatMap((entry) => {
+          const files = [entry.file];
+          if (entry.css) files.push(...entry.css);
+          return files;
+        })
+      );
+
+      filesToDelete.forEach((file) => {
+        try {
+          unlinkSync(path.join(ASSETS_DIR, file));
+        } catch { /* ignore if already gone */ }
+      });
+    },
+  };
+}
+
+export default defineConfig(() => ({
   plugins: [
+    cleanViteAssets(),
     shopify({
       themeRoot: './',
       sourceCodeDir: 'frontend',
       entrypointsDir: 'frontend/entrypoints',
-      additionalEntrypoints: [],
+      snippetFile: 'vite-tag.liquid',
+      themeHotReload: true,
+      versionNumbers: true,
     }),
   ],
   resolve: {
@@ -509,27 +585,29 @@ export default defineConfig({
   },
   build: {
     emptyOutDir: false,
-    manifest: true,
     rollupOptions: {
       output: {
-        entryFileNames: '[name].js',
-        assetFileNames: '[name][extname]',
-        chunkFileNames: '[name].js',
+        entryFileNames: '[name]-[hash].js',
+        assetFileNames: '[name]-[hash][extname]',
+        chunkFileNames: '[name]-[hash].js',
+        preserveModules: false,
+        manualChunks: undefined,
       }
     }
   },
   server: {
-    host: 'localhost',
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, HEAD, PUT, POST, PATCH, DELETE',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    host: '127.0.0.1',
+    cors: {
+      origin: [/\\.myshopify\\.com$/, /^https?:\\/\\/127\\.0\\.0\\.1(:\\d+)?$/, /^https?:\\/\\/localhost(:\\d+)?$/],
     },
   },
   css: {
-    devSourcemap: true,${_scssConfig}
+    devSourcemap: true,
+    modules: {
+      localsConvention: 'camelCase'
+    },${_scssPreprocessor}
   }
-});
+}));
 `;
 
   await writeFile('vite.config.js', _viteConfig);
@@ -633,16 +711,19 @@ async function createShopifyThemeToml(config: SetupConfig): Promise<void> {
 [environments.${config.environmentName}]
 store = "${config.storeUrl || 'your-store.myshopify.com'}"
 theme = "${config.themeId || 'YOUR_THEME_ID'}"
+password = "${config.storePassword || 'YOUR_THEME_ACCESS_TOKEN'}"
 ignore = [".shopifyignore"]
 
 # [environments.staging]
 # store = "${config.storeUrl || 'your-store.myshopify.com'}"
 # theme = "STAGING_THEME_ID"
+# password = "YOUR_THEME_ACCESS_TOKEN"
 # ignore = [".shopifyignore"]
 
 # [environments.production]
 # store = "${config.storeUrl || 'your-store.myshopify.com'}"
 # theme = "PRODUCTION_THEME_ID"
+# password = "YOUR_THEME_ACCESS_TOKEN"
 # ignore = [".shopifyignore"]
 `;
 
@@ -1120,7 +1201,7 @@ type LogLevel = 'log' | 'info' | 'warn' | 'error';
 export function consoleMessage(
   message${_typeAnnotations ? ': string' : ''},
   level${_typeAnnotations ? ': LogLevel' : ''} = 'log',
-  data${_typeAnnotations ? '?: unknown' : ''} = null
+  data${_typeAnnotations ? ': unknown' : ''} = null
 )${_typeAnnotations ? ': void' : ''} {
   if (!window.${config.projectNameSafe}?.settings?.devMode) return;
 
@@ -1177,7 +1258,7 @@ export function throttle${_typeAnnotations ? '<T extends (...args: unknown[]) =>
  */
 export function dispatchStoreEvent(
   name${_typeAnnotations ? ': string' : ''},
-  detail${_typeAnnotations ? '?: unknown' : ''} = {}
+  detail${_typeAnnotations ? ': unknown' : ''} = {}
 )${_typeAnnotations ? ': void' : ''} {
   const _event = new CustomEvent(name, { detail });
   window.${config.projectNameSafe}.events.dispatchEvent(_event);
@@ -2390,6 +2471,8 @@ async function main(): Promise<void> {
     log('\nSetup failed:', colors.red);
     console.error(_error);
     process.exit(1);
+  } finally {
+    _rl.close();
   }
 }
 
