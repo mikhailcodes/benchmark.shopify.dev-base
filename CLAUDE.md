@@ -281,49 +281,80 @@ The `~` alias is configured in `vite.config.js` and points to the `frontend/` di
 
 ### 3. Component Architecture
 
-Use class-based components extending `BaseComponent` for reusable UI components:
+Section components extend `BaseComponent<TConfig>`. Construction is two steps: the
+constructor only stores its arguments, and `mount()` resolves config and runs
+`init()`.
 
-```javascript
-import { BaseComponent } from '~/scripts/components/baseComponent';
+That split is not stylistic. A subclass's field initialisers do not run until after
+`super()` returns, so an `init()` called from the base constructor sees every
+subclass field as `undefined`. Register through `mountComponent()` and the second
+step cannot be forgotten.
 
-export class CartDrawer extends BaseComponent {
-  constructor(selector) {
-    super(selector);
-    this.isOpen = false;
+```typescript
+import { BaseComponent, mountComponent, type BaseConfig } from '@/scripts/components/shared';
+import { useSectionLifecycle } from '@/scripts/hooks';
+import { cacheElements, guardElement } from '@/scripts/utils';
+
+type CartDrawerConfig = BaseConfig & {
+  closeOnEscape: boolean;
+};
+
+export class CartDrawer extends BaseComponent<CartDrawerConfig> {
+  /** The minifier mangles this.constructor.name, so declare it explicitly. */
+  protected readonly componentName = 'CartDrawer';
+
+  private elements!: Record<'toggle' | 'panel', HTMLElement | null>;
+  private isOpen = false;
+
+  /** Must return literals — it runs before init() and cannot read instance fields. */
+  protected getDefaultConfig(): CartDrawerConfig {
+    return { debug: false, closeOnEscape: true };
   }
 
-  setupElement(element) {
-    // Called for each element matching selector
-    this.toggleButton = element.querySelector('.cart-toggle');
-    this.closeButton = element.querySelector('.cart-close');
+  protected init(): void {
+    this.elements = cacheElements(this.container, {
+      toggle: '[data-cart-toggle]',
+      panel: '[data-cart-panel]',
+    });
 
-    this.toggleButton?.addEventListener('click', this.open.bind(this));
-    this.closeButton?.addEventListener('click', this.close.bind(this));
+    if (!guardElement(this.elements.toggle, 'CartDrawer: toggle not found')) return;
+
+    // addListener() records the exact handler reference and removes it in
+    // destroy(). Calling addEventListener with an inline .bind(this) and then
+    // removeEventListener with the unbound method never detaches anything.
+    this.addListener(this.elements.toggle, 'click', () => this.toggle());
+
+    if (this.config.closeOnEscape) {
+      this.addListener(document, 'keydown', (event) => {
+        if ((event as KeyboardEvent).key === 'Escape') this.close();
+      });
+    }
   }
 
-  open() {
+  private toggle(): void {
+    this.isOpen ? this.close() : this.open();
+  }
+
+  private open(): void {
     this.isOpen = true;
-    this.element.classList.add('is-open');
-    document.body.style.overflow = 'hidden';
+    this.container.classList.add('is-open');
   }
 
-  close() {
+  private close(): void {
     this.isOpen = false;
-    this.element.classList.remove('is-open');
-    document.body.style.overflow = '';
-  }
-
-  destroy() {
-    // Cleanup event listeners
-    this.toggleButton?.removeEventListener('click', this.open);
-    this.closeButton?.removeEventListener('click', this.close);
-    super.destroy();
+    this.container.classList.remove('is-open');
   }
 }
 
-// Initialize
-new CartDrawer('.cart-drawer');
+useSectionLifecycle('cart-drawer', {
+  mount: 'visible',
+  onLoad: mountComponent(CartDrawer),
+  onUnload: (_root, instance) => (instance as CartDrawer)?.destroy(),
+});
 ```
+
+Anything you allocate beyond listeners — observers, timers, subscriptions — must be
+released in an overridden `destroy()` that calls `super.destroy()`.
 
 ### 4. Section Lifecycle Hooks
 

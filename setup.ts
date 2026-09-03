@@ -78,6 +78,119 @@ async function select(question: string, options: string[]): Promise<number> {
   return select(question, options);
 }
 
+const GITIGNORE_TEMPLATE = `# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Vite
+dist/
+dist-ssr/
+*.local
+.vite/
+# The Vite manifest must be committed: vite.config.js reads it to delete the
+# previous build's hashed assets, and CI has no other record of them.
+!assets/.vite/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
+*~
+.Spotlight-V100
+.Trashes
+
+# Shopify
+# config/settings_data.json is deliberately NOT ignored: Shopify's GitHub
+# integration commits theme-editor changes back to the branch, so ignoring it
+# would drop merchant settings on the next push.
+shopify.theme.toml
+.shopify/
+
+# Build artifacts
+*.log
+*.tsbuildinfo
+
+# Caches
+.eslintcache
+.cache
+coverage
+*.lcov
+
+# Yarn 4 — node-modules linker, so no PnP files are expected.
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnp.*
+
+# Lock files (Yarn only; yarn.lock is committed)
+package-lock.json
+bun.lock
+bun.lockb
+pnpm-lock.yaml
+`;
+
+const SHOPIFYIGNORE_TEMPLATE = `# Files excluded from Shopify theme uploads.
+# Only compiled output in assets/ ships; frontend/ is the source of truth.
+# Patterns are globs — a bare directory name does not match, so each entry
+# needs an explicit /* or /**.
+
+node_modules/**
+frontend/**
+dist/**
+
+# Scratch space for reference copies of the theme — never uploaded.
+initial build/**
+.github/**
+.claude/**
+.shopify/**
+.yarn/**
+.vscode/**
+.idea/**
+
+# Vite writes its build manifest here; Shopify rejects subfolders under assets/.
+assets/.vite/**
+
+vite.config.js
+postcss.config.js
+eslint.config.js
+tsconfig.json
+package.json
+setup.ts
+bun.lock
+bun.lockb
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.yarnrc.yml
+.pnp.*
+
+*.md
+.env*
+shopify.theme.toml
+example.shopify.theme.toml
+
+.DS_Store
+Thumbs.db
+`;
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -85,13 +198,26 @@ async function select(question: string, options: string[]): Promise<number> {
 interface SetupConfig {
   projectName: string;
   projectNameSafe: string; // For window object (no hyphens)
-  stylingApproach: 'scss' | 'css' | 'tailwind';
-  jsApproach: 'typescript' | 'vanilla';
-  packageManager: 'bun' | 'yarn';
+  /** Prefix for every custom Liquid file, e.g. 'refuge' -> snippets/refuge-card.liquid. */
+  namespace: string;
+  /** Existing live theme to preserve, or a fresh base theme. */
+  themeSource: 'existing' | 'new';
+  /**
+   * Whether Shopify's GitHub integration owns main/staging/qa. This decides
+   * whether config/settings_data.json is tracked and what CI does with assets.
+   */
+  githubIntegration: boolean;
   storeUrl: string;
   storePassword: string;
+  /** Storefront password, for password-protected stores. Not the access token. */
+  storefrontPassword: string;
   environmentName: string;
   themeId: string | null;
+  // Fixed: every project converged on these, and keeping the alternatives alive
+  // meant the generated code was never good at any of them.
+  stylingApproach: 'scss';
+  jsApproach: 'typescript';
+  packageManager: 'yarn';
 }
 
 interface ThemeInfo {
@@ -295,109 +421,136 @@ function displayThemeScanResults(scan: ThemeScanResult): void {
 // INTERACTIVE QUESTIONS
 // =============================================================================
 
+/**
+ * Reads answers from a JSON file instead of prompting.
+ *
+ * Needed because readline drops piped stdin under Bun, so `setup.ts < answers`
+ * silently stalls — which made the script impossible to drive non-interactively
+ * even though the docs told agents to run it.
+ *
+ *   bun setup.ts --config setup.config.json
+ */
+async function loadConfigFile(path: string): Promise<SetupConfig> {
+  const _raw = await Bun.file(path).text();
+  const _parsed = JSON.parse(_raw) as Partial<SetupConfig>;
+
+  const _required: (keyof SetupConfig)[] = ['projectName', 'namespace', 'storeUrl'];
+  const _missing = _required.filter((_key) => !_parsed[_key]);
+  if (_missing.length > 0) {
+    throw new Error(`Config file is missing required keys: ${_missing.join(', ')}`);
+  }
+
+  return {
+    projectNameSafe: String(_parsed.projectName).replace(/[-\s]/g, '_').toLowerCase(),
+    themeSource: 'existing',
+    githubIntegration: true,
+    storePassword: '',
+    storefrontPassword: '',
+    environmentName: 'development',
+    themeId: null,
+    ..._parsed,
+    stylingApproach: 'scss',
+    jsApproach: 'typescript',
+    packageManager: 'yarn',
+  } as SetupConfig;
+}
+
 async function askQuestions(): Promise<SetupConfig> {
   header('Shopify Theme Development Setup');
 
-  log('This script sets up a modern Shopify theme development environment.', colors.green);
-  log('Custom Elements + Section Registry + Vite + Bun\n', colors.dim);
+  log('Vite + TypeScript + SCSS on Yarn 4.', colors.green);
+  log('Read the Decisions section of project_setup.md before answering.\n', colors.dim);
 
-  // Question 1: Project Name
-  const _projectName = await prompt('Project name (e.g., acme-store):');
-
+  const _projectName = await prompt('Project name (e.g. acme-store):');
   if (!_projectName || _projectName.trim() === '') {
     log('Project name is required.', colors.red);
     process.exit(1);
   }
 
-  const _projectNameSafe = _projectName.replace(/-/g, '_').replace(/\s/g, '_').toLowerCase();
+  const _projectNameSafe = _projectName.replace(/[-\s]/g, '_').toLowerCase();
 
-  // Question 2: Styling Approach
-  subheader('Styling');
-  log('All options use semantic class names (BEM-style), mobile-first.\n', colors.dim);
+  // Decision 4 — the prefix every custom Liquid file carries. Renaming it later
+  // touches every {% render %} call, so it is asked up front.
+  subheader('Namespace');
+  log('Every custom Liquid file is prefixed with this, so a base-theme upgrade', colors.dim);
+  log('can be applied by overwriting every file that lacks it.\n', colors.dim);
 
-  const _stylingChoice = await select('Which styling approach?', [
-    'SCSS (Recommended - tokens, mixins, nesting)',
-    'Plain CSS (CSS custom properties only)',
-    'Tailwind CSS (Using @apply in CSS files, NOT inline utilities)',
+  const _namespace =
+    (await prompt(`Namespace prefix (default: ${_projectNameSafe.split('_')[0]}):`)) ||
+    _projectNameSafe.split('_')[0];
+
+  // Decision 1 — decides what the baseline commit means.
+  subheader('Starting point');
+  const _sourceChoice = await select('Is this a new build or an existing theme?', [
+    'Existing live theme (pull it first and commit it untouched)',
+    'Brand new build (start from a clean base theme)',
   ]);
-  const _stylingMap: SetupConfig['stylingApproach'][] = ['scss', 'css', 'tailwind'];
-  const _stylingApproach = _stylingMap[_stylingChoice];
+  const _themeSource: SetupConfig['themeSource'] = _sourceChoice === 0 ? 'existing' : 'new';
 
-  // Question 3: JavaScript Approach
-  subheader('JavaScript');
+  // Decision 3 — the one people get wrong, and it destroys merchant data.
+  subheader('Deployment');
+  log('If Shopify\'s GitHub integration syncs main/staging/qa, then', colors.dim);
+  log('config/settings_data.json MUST be tracked: Shopify commits theme-editor', colors.dim);
+  log('changes back to the branch, and ignoring it wipes merchant settings.\n', colors.dim);
 
-  const _jsChoice = await select('Which JavaScript approach?', [
-    'TypeScript (Recommended - type safety, better IDE support)',
-    'Vanilla JavaScript',
+  const _integrationChoice = await select('Is the GitHub integration connected?', [
+    'Yes - Shopify syncs branches (track settings_data.json, CI commits assets)',
+    'No - CLI-driven only (ignore settings_data.json, CI just verifies)',
   ]);
-  const _jsApproach: SetupConfig['jsApproach'] = _jsChoice === 0 ? 'typescript' : 'vanilla';
+  const _githubIntegration = _integrationChoice === 0;
 
-  // Question 4: Package Manager
-  subheader('Package Manager');
-
-  const _pmChoice = await select('Which package manager?', [
-    'Yarn (Recommended)',
-    'Bun',
-  ]);
-  const _packageManager: SetupConfig['packageManager'] = _pmChoice === 0 ? 'yarn' : 'bun';
-
-  // Question 5: Shopify Store Configuration
-  subheader('Shopify Store Configuration');
-
-  log('Creating shopify.theme.toml for store credentials.\n', colors.dim);
-  log('Tip: You can paste your Shopify admin URL directly:', colors.dim);
-  log('     https://admin.shopify.com/store/your-store/themes\n', colors.dim);
-
+  subheader('Shopify Store');
   const _storeInput = await prompt('Store URL or admin URL:');
   const _normalizedStoreUrl = parseStoreUrl(_storeInput);
 
-  if (_normalizedStoreUrl) {
-    log(`Store: ${_normalizedStoreUrl}`, colors.green);
-  }
+  log('\nTheme access token (shptka_...) from Settings -> Apps -> Develop apps.', colors.dim);
+  const _storePassword = await prompt('Theme access token:');
 
-  log('\nTheme Access Token is required to fetch your themes.', colors.dim);
-  log('Get it from: Shopify Admin → Settings → Apps and sales channels → Develop apps\n', colors.dim);
-  const _storePassword = await prompt('Theme Access Token:');
+  log('\nStorefront password, only if the store is password-protected.', colors.dim);
+  log('This is NOT the access token - they are different credentials.', colors.dim);
+  const _storefrontPassword = await prompt('Storefront password (blank if none):');
 
   const _environmentName = (await prompt('Environment name (default: development):')) || 'development';
 
   let _themeId: string | null = null;
 
   if (_normalizedStoreUrl && _storePassword) {
-    log('\nFetching themes from store...', colors.cyan);
+    log('\nFetching themes...', colors.cyan);
     const _themes = await getShopifyThemes(_normalizedStoreUrl, _storePassword);
 
     if (_themes.length > 0) {
-      log('', colors.reset);
-      const _themeOptions = _themes.map(
-        (_t) => `${_t.name} (${_t.role}) - ID: ${_t.id}`
-      );
+      const _themeOptions = _themes.map((_t) => `${_t.name} (${_t.role}) - ID: ${_t.id}`);
       _themeOptions.push('Skip - configure later');
 
-      const _themeChoice = await select('Select theme for development:', _themeOptions);
+      const _label =
+        _themeSource === 'existing'
+          ? 'Which theme is live? (it will be pulled as the baseline)'
+          : 'Which theme should the dev environment target?';
 
+      const _themeChoice = await select(_label, _themeOptions);
       if (_themeChoice < _themes.length) {
         _themeId = _themes[_themeChoice].id;
         log(`\nSelected: ${_themes[_themeChoice].name}`, colors.green);
       }
     } else {
-      log('Could not fetch themes. Check your store URL and access password.', colors.yellow);
-      log('You can configure the theme ID manually in shopify.theme.toml\n', colors.dim);
+      log('Could not fetch themes. Set the theme id in shopify.theme.toml later.', colors.yellow);
     }
-  } else {
-    log('Skipping theme fetch — store URL or password not provided.', colors.yellow);
   }
 
   return {
     projectName: _projectName,
     projectNameSafe: _projectNameSafe,
-    stylingApproach: _stylingApproach,
-    jsApproach: _jsApproach,
-    packageManager: _packageManager,
+    namespace: _namespace,
+    themeSource: _themeSource,
+    githubIntegration: _githubIntegration,
     storeUrl: _normalizedStoreUrl,
     storePassword: _storePassword,
+    storefrontPassword: _storefrontPassword,
     environmentName: _environmentName,
     themeId: _themeId,
+    stylingApproach: 'scss',
+    jsApproach: 'typescript',
+    packageManager: 'yarn',
   };
 }
 
@@ -433,72 +586,70 @@ async function createDirectoryStructure(config: SetupConfig): Promise<void> {
 async function createPackageJson(config: SetupConfig): Promise<void> {
   header('Creating package.json');
 
-  const _runCmd = config.packageManager === 'yarn' ? 'yarn' : 'bun run';
-
+  // Scripts are only generated for the dev environment. A deploy:staging that
+  // targets a Shopify-managed theme competes with the GitHub integration.
   const _packageJson = {
     name: `${config.projectName}-theme`,
     version: '1.0.0',
     type: 'module',
-    packageManager: config.packageManager === 'yarn' ? 'yarn@1.22.22' : 'bun@1.2.0',
+    packageManager: 'yarn@4.18.0',
+    engines: { node: '>=20' },
     scripts: {
-      dev: 'run-p -sr "shopify:dev" "vite:dev"',
-      build: `${_runCmd} vite:build`,
-      deploy: 'run-s "vite:build" "shopify:push"',
-      'deploy:staging': 'run-s "vite:build" "shopify:push:staging"',
-      'deploy:production': 'run-s "vite:build" "shopify:push:production"',
-      'shopify:dev': `shopify theme dev --environment ${config.environmentName}`,
-      'shopify:dev:staging': 'shopify theme dev --environment staging',
-      'shopify:dev:production': 'shopify theme dev --environment production',
-      'shopify:push': `shopify theme push --environment ${config.environmentName}`,
-      'shopify:push:staging': 'shopify theme push --environment staging',
-      'shopify:push:production': 'shopify theme push --environment production',
+      dev: 'run-p -sr "shopify:dev" "vite:dev" --',
+      build: 'vite build',
+      deploy: 'run-s "build" "push" --',
+      push: `shopify theme push --environment ${config.environmentName}`,
+      pull: `shopify theme pull --environment ${config.environmentName}`,
+      'shopify:dev': `shopify theme dev --environment ${config.environmentName} --live-reload=hot-reload`,
       'vite:dev': 'vite',
       'vite:build': 'vite build',
-      'type-check': config.jsApproach === 'typescript' ? 'tsc --noEmit' : undefined,
-      clean: 'rm -rf dist assets/storefront.js assets/custom_styling.css',
+      'type-check': 'tsc --noEmit',
+      lint: 'eslint frontend',
+      clean: 'rm -rf dist assets/storefront-*.js assets/styles-*.css assets/.vite',
     },
   };
 
-  // Remove undefined scripts
-  Object.keys(_packageJson.scripts).forEach((_key) => {
-    if (_packageJson.scripts[_key as keyof typeof _packageJson.scripts] === undefined) {
-      delete _packageJson.scripts[_key as keyof typeof _packageJson.scripts];
-    }
-  });
-
-  await writeFile('package.json', JSON.stringify(_packageJson, null, 2));
+  await writeFile('package.json', JSON.stringify(_packageJson, null, 2) + '\n');
   log('Created: package.json', colors.green);
 }
 
-async function installDependencies(config: SetupConfig): Promise<void> {
+async function createYarnRc(): Promise<void> {
+  header('Configuring Yarn');
+
+  await writeFile(
+    '.yarnrc.yml',
+    `# PnP breaks the Shopify CLI and vite-plugin-shopify, both of which resolve
+# and spawn binaries from a real node_modules tree.
+nodeLinker: node-modules
+
+enableGlobalCache: true
+`
+  );
+  log('Created: .yarnrc.yml', colors.green);
+}
+
+async function installDependencies(): Promise<void> {
   header('Installing Dependencies');
 
   const _deps = [
     'vite',
     'vite-plugin-shopify',
-    'postcss',
-    'autoprefixer',
+    'typescript',
+    '@types/node',
+    'sass',
+    'eslint',
+    '@eslint/js',
+    '@typescript-eslint/eslint-plugin',
+    '@typescript-eslint/parser',
     'npm-run-all',
+    'postcss',
   ];
 
-  if (config.stylingApproach === 'scss') {
-    _deps.push('sass');
-  } else if (config.stylingApproach === 'tailwind') {
-    _deps.push('tailwindcss');
-  }
-
-  if (config.jsApproach === 'typescript') {
-    _deps.push('typescript', '@types/node');
-  }
-
-  log(`Installing with ${config.packageManager}...`, colors.cyan);
-
   try {
-    if (config.packageManager === 'bun') {
-      await $`bun add -d ${_deps}`;
-    } else {
-      await $`yarn add -D ${_deps}`;
-    }
+    // Corepack resolves the version pinned in packageManager, so the toolchain
+    // lives in the repo rather than on whatever each machine has installed.
+    await $`corepack enable`;
+    await $`yarn add -D ${_deps}`;
     log('Dependencies installed successfully', colors.green);
   } catch (_error) {
     log('Error installing dependencies', colors.red);
@@ -731,120 +882,124 @@ ignore = [".shopifyignore"]
   log('Created: shopify.theme.toml', colors.green);
 }
 
-async function createGitIgnore(): Promise<void> {
-  const _gitignore = `# Dependencies
-node_modules/
+async function createGitIgnore(config: SetupConfig): Promise<void> {
+  header('Creating .gitignore');
 
-# Environment
-.env
-.env.*
-.env.local
+  // config/settings_data.json is only safe to ignore when Shopify's GitHub
+  // integration is NOT connected. When it is, Shopify commits theme-editor
+  // changes back to the branch, and ignoring the file drops merchant settings
+  // on the next push.
+  const _settingsData = config.githubIntegration
+    ? ''
+    : '\n# No GitHub integration, so theme settings are not synced through Git.\nconfig/settings_data.json\n';
 
-# Vite
-dist/
-.vite/
-
-# Shopify
-config/settings_data.json
-shopify.theme.toml
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Editor
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-.idea/
-
-# Logs
-*.log
-`;
-
-  await writeFile('.gitignore', _gitignore);
+  await writeFile('.gitignore', GITIGNORE_TEMPLATE + _settingsData);
   log('Created: .gitignore', colors.green);
+
+  if (config.githubIntegration) {
+    log('  settings_data.json left TRACKED (GitHub integration is connected)', colors.dim);
+  }
 }
 
 async function createShopifyIgnore(): Promise<void> {
-  const _shopifyignore = `# Source files (Vite compiles these)
-frontend/
+  header('Creating .shopifyignore');
 
-# Config files
-vite.config.js
-postcss.config.js
-tailwind.config.js
-tsconfig.json
-package.json
-bun.lockb
-yarn.lock
-
-# Git
-.git/
-.gitignore
-
-# CI/CD
-.github/
-
-# Documentation
-*.md
-
-# Setup
-setup.ts
-
-# Claude
-.claude/
-
-# Environment
-.env*
-
-# Editor
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-`;
-
-  await writeFile('.shopifyignore', _shopifyignore);
+  await writeFile('.shopifyignore', SHOPIFYIGNORE_TEMPLATE);
   log('Created: .shopifyignore', colors.green);
 }
 
 async function createGitHubWorkflow(config: SetupConfig): Promise<void> {
-  const _pm = config.packageManager;
-  const _setupAction = _pm === 'bun' ? 'oven-sh/setup-bun@v1' : 'actions/setup-node@v4';
-  const _setupWith = _pm === 'bun' ? 'bun-version: latest' : 'node-version: 20';
+  header('Creating GitHub Actions workflow');
 
-  const _workflow = `name: Build Assets
+  // When Shopify syncs a branch, CI has to COMMIT the built assets back to it —
+  // that commit is what Shopify deploys. Without the integration, CI only needs
+  // to verify the committed assets match the source.
+  const _assetStep = config.githubIntegration
+    ? `      - name: Commit built assets
+        if: github.event_name == 'push'
+        id: commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A assets snippets/vite-tag.liquid
+          if [[ -n $(git status --porcelain) ]]; then
+            git commit -m "chore(assets): compile theme assets"
+            echo "changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Push built assets
+        if: github.event_name == 'push' && steps.commit.outputs.changes == 'true'
+        run: |
+          for attempt in 1 2 3; do
+            git push origin HEAD:\${{ github.ref_name }} && exit 0
+            git fetch origin \${{ github.ref_name }}
+            # In a rebase 'theirs' is the commit being replayed - the assets this
+            # run just built, the correct winner for generated output.
+            git rebase -X theirs origin/\${{ github.ref_name }} || {
+              git rebase --abort; exit 1;
+            }
+          done
+          exit 1
+
+      - name: Verify assets are in sync (PR)
+        if: github.event_name == 'pull_request'
+        run: git diff --exit-code assets/ snippets/vite-tag.liquid`
+    : `      - name: Verify assets are in sync
+        run: |
+          git diff --exit-code assets/ snippets/vite-tag.liquid || {
+            echo "Built assets are out of sync. Run 'yarn build' and commit."
+            exit 1
+          }`;
+
+  const _workflow = `name: Build
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, staging, qa]
   pull_request:
-    branches: [main, develop]
+    branches: [main, staging, qa]
+
+# Assets derive entirely from source, so only the newest push per branch is worth
+# building. Cancelling superseded runs also stops two of them racing to push their
+# asset commit, which leaves one rejected with "fetch first".
+concurrency:
+  group: build-\${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
+    # Without this guard, the workflow's own asset commit triggers another build.
+    if: github.actor != 'github-actions[bot]' && github.actor != 'shopify[bot]'
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup ${_pm === 'bun' ? 'Bun' : 'Node.js'}
-        uses: ${_setupAction}
+      - uses: actions/setup-node@v4
         with:
-          ${_setupWith}
+          node-version: '22'
 
-      - name: Install dependencies
-        run: ${_pm} install
+      # Corepack must run before any yarn call. setup-node's built-in yarn cache
+      # runs earlier and would probe the runner's preinstalled Yarn 1.
+      - run: corepack enable
 
-      - name: Build assets
-        run: ${_pm} run build
+      - id: yarn-cache
+        run: echo "dir=\$(yarn config get cacheFolder)" >> "\$GITHUB_OUTPUT"
 
-      - name: Check assets are in sync
-        run: |
-          git diff --exit-code assets/ || \\
-          (echo "Assets out of sync. Run '${_pm} run build' and commit." && exit 1)
+      - uses: actions/cache@v4
+        with:
+          path: \${{ steps.yarn-cache.outputs.dir }}
+          key: yarn-\${{ runner.os }}-\${{ hashFiles('yarn.lock') }}
+          restore-keys: yarn-\${{ runner.os }}-
+
+      - run: yarn install --immutable
+      - run: yarn type-check
+      - run: yarn lint
+      - run: yarn build
+
+\${_assetStep}
 `;
 
   await writeFile('.github/workflows/build.yml', _workflow);
@@ -2354,14 +2509,23 @@ async function pullTheme(config: SetupConfig): Promise<void> {
     return;
   }
 
-  header('Pulling Shopify Theme');
+  header(config.themeSource === 'existing' ? 'Pulling Live Theme' : 'Pulling Base Theme');
 
   try {
-    log(`Pulling theme ${config.themeId}...`, colors.cyan);
     await $`shopify theme pull --theme ${config.themeId} --environment ${config.environmentName}`;
     log('Theme pulled successfully', colors.green);
 
-    // Scan theme for events
+    if (config.themeSource === 'existing') {
+      // The baseline must be byte-identical to what is live, so every later diff
+      // is unambiguously ours.
+      log('\nCommit this BEFORE adding anything else:', colors.yellow);
+      log('  git add -A', colors.dim);
+      log('  git commit -m "chore(theme): pull live theme as baseline"', colors.dim);
+      log('\nThen record the theme-check baseline:', colors.yellow);
+      log('  shopify theme check', colors.dim);
+      log('Pre-existing offences in core files are not yours to fix.', colors.dim);
+    }
+
     const _scanResult = await scanThemeForEvents('.');
     displayThemeScanResults(_scanResult);
   } catch (_error) {
@@ -2426,34 +2590,47 @@ function displayNextSteps(config: SetupConfig): void {
 
 async function main(): Promise<void> {
   try {
-    const _config = await askQuestions();
+    // --config <file> bypasses the prompts entirely, so the script can be driven
+    // by CI or a coding agent. readline drops piped stdin under Bun, so feeding
+    // answers on stdin does not work.
+    const _configFlag = process.argv.indexOf('--config');
+    const _config =
+      _configFlag !== -1 && process.argv[_configFlag + 1]
+        ? await loadConfigFile(process.argv[_configFlag + 1])
+        : await askQuestions();
 
-    // Confirmation
     subheader('Configuration Summary');
-    log(`Project: ${_config.projectName}`, colors.cyan);
-    log(`Styling: ${_config.stylingApproach}`, colors.cyan);
-    log(`JavaScript: ${_config.jsApproach}`, colors.cyan);
-    log(`Package Manager: ${_config.packageManager}`, colors.cyan);
-    log(`Store: ${_config.storeUrl || '(not configured)'}`, colors.cyan);
-    log(`Theme: ${_config.themeId || '(not selected)'}`, colors.cyan);
+    log(`Project:      ${_config.projectName}`, colors.cyan);
+    log(`Namespace:    ${_config.namespace}-*`, colors.cyan);
+    log(`Starting from: ${_config.themeSource === 'existing' ? 'existing live theme' : 'new build'}`, colors.cyan);
+    log(`GitHub sync:  ${_config.githubIntegration ? 'yes (settings_data.json tracked)' : 'no (CLI only)'}`, colors.cyan);
+    log(`Store:        ${_config.storeUrl || '(not configured)'}`, colors.cyan);
+    log(`Theme:        ${_config.themeId || '(not selected)'}`, colors.cyan);
     console.log();
 
-    const _confirm = await prompt('Proceed with setup? (y/n):');
-    if (_confirm.toLowerCase() !== 'y' && _confirm.toLowerCase() !== 'yes') {
-      log('Setup cancelled.', colors.yellow);
-      process.exit(0);
+    if (_configFlag === -1) {
+      const _confirm = await prompt('Proceed with setup? (y/n):');
+      if (!['y', 'yes'].includes(_confirm.toLowerCase())) {
+        log('Setup cancelled.', colors.yellow);
+        process.exit(0);
+      }
     }
 
-    // Run setup
+    // The theme is pulled FIRST when starting from an existing store, so the
+    // baseline commit can be the merchant's theme untouched.
+    if (_config.themeSource === 'existing') {
+      await pullTheme(_config);
+    }
+
     await createPackageJson(_config);
-    await installDependencies(_config);
+    await createYarnRc();
+    await installDependencies();
     await createDirectoryStructure(_config);
     await createViteConfig(_config);
     await createPostCSSConfig(_config);
-    await createTailwindConfig(_config);
     await createTypeScriptConfig(_config);
     await createShopifyThemeToml(_config);
-    await createGitIgnore();
+    await createGitIgnore(_config);
     await createShopifyIgnore();
     await createGitHubWorkflow(_config);
     await createEntrypoints(_config);
@@ -2463,7 +2640,11 @@ async function main(): Promise<void> {
     await createExampleSection(_config);
     await createClaudeMd(_config);
     await createAgents(_config);
-    await pullTheme(_config);
+
+    if (_config.themeSource === 'new') {
+      await pullTheme(_config);
+    }
+
     await runInitialBuild(_config);
 
     displayNextSteps(_config);
