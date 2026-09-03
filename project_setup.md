@@ -1,1169 +1,563 @@
-# Shopify Theme Development Environment Setup Guide
+# Shopify Theme Development Environment
 
-This document provides step-by-step instructions for setting up a modern Shopify theme development environment with Vite, Bun, and proper CI/CD workflows. Use this guide when starting development on a new store to ensure consistency across projects.
+Vite + TypeScript + SCSS on top of a Shopify theme, with the build committed to
+Git so Shopify's GitHub integration can sync it.
 
-## 🚀 Quick Start (Recommended)
-
-**Run the automated setup script:**
-
-```bash
-bun setup.ts
-```
-
-The setup script will:
-- Ask you configuration questions interactively
-- Pull your chosen Shopify theme as a base
-- Install all dependencies
-- Create the complete project structure
-- Generate all configuration files
-- Run the initial build
-- Initialize git repository
-
-**That's it!** The script handles everything for you. Continue reading only if you want to understand the details or set up manually.
+This document is the decision record as much as the instructions. Read
+"Decisions" before running anything — the answers change what you scaffold.
 
 ---
 
-## Table of Contents
-1. [Prerequisites](#prerequisites)
-2. [Project Configuration Questions](#project-configuration-questions)
-3. [Initial Setup](#initial-setup)
-4. [Package Configuration](#package-configuration)
-5. [Vite Configuration](#vite-configuration)
-6. [Project Structure](#project-structure)
-7. [Git Configuration](#git-configuration)
-8. [GitHub Actions CI/CD](#github-actions-cicd)
-9. [Development Workflow](#development-workflow)
-10. [Code Style Guidelines](#code-style-guidelines)
-11. [Documentation](#documentation)
+## Table of contents
+
+1. [Decisions](#decisions)
+2. [Path A — existing live theme](#path-a--existing-live-theme)
+3. [Path B — brand new build](#path-b--brand-new-build)
+4. [Shared setup](#shared-setup)
+5. [The namespace rule](#the-namespace-rule)
+6. [Branches, themes and who owns what](#branches-themes-and-who-owns-what)
+7. [Theme settings](#theme-settings)
+8. [Architecture](#architecture)
+9. [Gotchas that have actually bitten us](#gotchas-that-have-actually-bitten-us)
+10. [Post-setup checklist](#post-setup-checklist)
 
 ---
 
-## Prerequisites
+## Decisions
 
-Before starting, ensure you have the following installed:
+Answer these five before touching the filesystem. Everything downstream follows.
 
-- **Bun** (v1.3.0 or higher) - [Install Bun](https://bun.sh)
-- **Shopify CLI** - [Install Shopify CLI](https://shopify.dev/docs/themes/tools/cli/install)
-- **Git** - For version control
-- **Node.js** (optional, but recommended for compatibility)
+### 1. Existing theme, or new build?
 
-Verify installations:
-```bash
-bun --version
-shopify version
-git --version
-```
+| | Existing live theme | Brand new build |
+|---|---|---|
+| First action | Pull the live theme, commit it untouched | Pull the chosen base theme at a known version |
+| Baseline commit | "the merchant's theme as of <date>" | "Horizon x.y.z, unmodified" |
+| Risk to manage | Overwriting merchant customisations | None yet — establish conventions early |
+| `config/settings_data.json` | **Sacred.** Contains live merchant settings | Defaults; still tracked |
 
----
+Take [Path A](#path-a--existing-live-theme) or [Path B](#path-b--brand-new-build).
+Both converge on [Shared setup](#shared-setup).
 
-## Project Configuration Questions
+### 2. Which base theme?
 
-**IMPORTANT FOR AI CODING AGENTS:** When setting up a new project, you MUST run the setup script (`bun setup.ts`) instead of manually creating files. The script will ask the user these questions interactively.
+**Horizon**, unless the theme is going to the Shopify Theme Store.
 
-The setup script will ask the following questions:
+Horizon is Shopify's current flagship: theme blocks with 8 levels of nesting, web
+components on the storefront, frequent updates. Its one disqualifier is that
+themes derived from Horizon are **not eligible for Theme Store submission** —
+which is precisely why Shopify ships **Skeleton**, a bare scaffold, for that case.
 
-### 1. Project/Store Name
-**Question:** What is your project/store name?
-- Used to name the project directory, package.json, and global JavaScript object
-- Example: `my-store`, `acme-shop`, `boutique`
+- Building one merchant's storefront → **Horizon**.
+- Building a theme to sell in the Theme Store → **Skeleton**.
+- Inheriting a Dawn-based theme → leave it on Dawn; a base-theme migration is a
+  rebuild, not an upgrade. Scope it separately.
 
-### 2. Styling Approach
-**Question:** Which styling approach will you use?
-- **Option A:** Plain CSS (Recommended for simplicity)
-- **Option B:** SCSS/SASS (If you need variables, mixins, nesting)
-- **Option C:** PostCSS with plugins (For advanced processing)
-- **Option D:** Tailwind CSS (Utility-first approach)
+Record the exact base version in the baseline commit message. You will want it
+when the first upgrade lands.
 
-**Default:** Plain CSS with CSS custom properties for semantic class names and maintainability.
+### 3. Is Shopify's GitHub integration in play?
 
-### 3. JavaScript Approach
-**Question:** Which JavaScript approach will you use?
-- **Option A:** Vanilla JavaScript (Recommended for Shopify themes)
-- **Option B:** TypeScript (For type safety and larger projects)
+This is the decision people get wrong, and it silently destroys merchant data.
 
-**Default:** Vanilla JavaScript for simplicity and theme compatibility.
+| | GitHub integration connected | CLI-driven only |
+|---|---|---|
+| Who deploys | Shopify, from the branch | You, via `shopify theme push` |
+| `config/settings_data.json` | **Must be tracked.** Shopify commits theme-editor changes back to the branch | May be gitignored |
+| `shopify.theme.toml` | Only needs the dev environment | Needs one environment per theme |
+| CI's job | **Commit built assets back to the branch** so Shopify syncs them | Just verify assets are in sync |
 
-### 4. Package Manager
-**Question:** Which package manager will you use?
-- **Option A:** Bun (Recommended - fast, modern)
-- **Option B:** npm (Standard, widely supported)
-- **Option C:** pnpm (Efficient disk usage)
-- **Option D:** yarn (Stable alternative)
+If a branch is connected to Shopify and you gitignore `settings_data.json`, the
+first push replaces the merchant's live theme settings with nothing. Track it.
 
-**Default:** Bun for superior performance.
+The usual shape: `main`/`staging`/`qa` connected to Shopify, plus one unpublished
+`[Dev]` theme driven from the CLI for local work.
 
-### 5. Shopify Theme Configuration (TOML)
-**Question:** How would you like to configure Shopify store access?
-- **Option A:** Create shopify.theme.toml file (Recommended - stores environment configs)
-- **Option B:** Use Shopify CLI login only (No .toml file, authenticate via CLI each time)
-- **Option C:** Skip for now (Configure manually later)
+### 4. Namespace prefix
 
-**Default:** Create shopify.theme.toml file.
+Pick a 2–8 character prefix for every custom Liquid file — `refuge-`, `sc-`,
+whatever fits the store. See [The namespace rule](#the-namespace-rule). Decide it
+now; renaming later touches every `{% render %}` call.
 
-The `shopify.theme.toml` file stores your store URL and theme IDs for different environments. This file will be added to `.gitignore` at the **end of setup** to protect your credentials while still allowing you to commit it to private repositories if desired.
+### 5. Stack
 
-If you choose the .toml approach, you'll be asked for your store URL (e.g., `your-store.myshopify.com`).
-
-If you choose CLI-only access, you'll need to run `shopify auth login` before each development session.
-
-### 6. Shopify Environment & Theme
-**Question:** Which Shopify theme would you like to use as a base?
-- The script will automatically fetch available themes from your Shopify store
-- You can select any theme (development, live, etc.)
-- You'll be asked to name the environment (e.g., "development", "staging")
-- You can skip this step and configure it later
-
-**Note:** Make sure you're authenticated with Shopify CLI before running the setup script.
+TypeScript + SCSS, Yarn 4, Vite. These are no longer options in this template —
+every project converged on them, and keeping the alternatives alive meant the
+generated code was never good at any of them.
 
 ---
 
-## Initial Setup
+## Path A — existing live theme
 
-### Automated Setup (Recommended)
-
-Simply run the setup script:
-
-```bash
-bun setup.ts
-```
-
-The script will handle all the steps below automatically.
-
----
-
-### Manual Setup (If you prefer to do it yourself)
-
-### Step 1: Navigate to Your Shopify Theme Directory
-
-```bash
-cd /path/to/your/shopify-theme
-```
-
-Ensure you're in the root directory where `layout/`, `sections/`, `templates/`, etc. exist.
-
-### Step 2: Initialize Git Repository (if not already)
+The goal is a baseline commit that is byte-identical to what is live, so every
+later diff is unambiguously yours.
 
 ```bash
 git init
-git add .
-git commit -m "Initial commit: Base Shopify theme"
+gh repo create <org>/<store>.shopify --private --source=. --remote=origin
+
+# Confirm which theme is actually live before pulling — roles change in the admin.
+SHOPIFY_CLI_THEME_TOKEN=shptka_xxx shopify theme list --store <store>.myshopify.com
+
+SHOPIFY_CLI_THEME_TOKEN=shptka_xxx \
+  shopify theme pull --store <store>.myshopify.com --live --path .
 ```
 
-### Step 3: Initialize Bun Package Manager
+Commit it before adding anything:
 
 ```bash
-bun init -y
+git add -A
+git commit -m "chore(theme): pull live theme as baseline
+
+Pulled '<theme name>' (#<id>) from <store>.myshopify.com as the untouched
+starting point. Base theme: Horizon x.y.z."
 ```
 
-This creates a `package.json` file in your project root.
+Two things to verify at this point:
+
+- `config/settings_data.json` exists and is **not** gitignored. It holds the
+  merchant's live settings and it is the one file you cannot regenerate.
+- Run `shopify theme check` and record the offence count. That is your baseline;
+  pre-existing offences in core theme files are not yours to fix, and you want to
+  be able to prove that later.
+
+Then go to [Shared setup](#shared-setup).
+
+## Path B — brand new build
+
+```bash
+git init
+gh repo create <org>/<store>.shopify --private --source=. --remote=origin
+
+# Horizon, unless building for the Theme Store — see decision 2.
+shopify theme init --clone-url https://github.com/Shopify/horizon
+```
+
+Commit the unmodified base with its version in the message, then create the
+themes you need up front:
+
+```bash
+shopify theme push --unpublished --theme "[Dev] <Store>"
+```
+
+Only create `[Staging]`/`[QA]` themes if you are **not** using the GitHub
+integration. If you are, Shopify creates and syncs those themes itself when you
+connect the branches, and a hand-made theme of the same name just competes with
+it.
+
+Then go to [Shared setup](#shared-setup).
 
 ---
 
-## Package Configuration
+## Shared setup
 
-### Step 1: Install Dependencies
+### 1. Toolchain
 
-Install the required development dependencies:
+Yarn 4 is pinned through Corepack, so the version lives in the repo rather than
+on each machine:
 
 ```bash
-bun add -d vite vite-plugin-shopify postcss autoprefixer npm-run-all @shopify/theme-check-node
+corepack enable
+yarn set version 4
 ```
 
-**Optional:** If using SCSS:
+`.yarnrc.yml`:
+
+```yaml
+# PnP breaks the Shopify CLI and vite-plugin-shopify, both of which resolve and
+# spawn binaries from a real node_modules tree.
+nodeLinker: node-modules
+```
+
+Do not change `nodeLinker`. Yarn 4 also disables dependency install scripts by
+default; nothing in this stack needs them (esbuild ships native binaries as
+optional platform packages). If a future dependency does, allow it per package
+with `dependenciesMeta.<pkg>.built: true` rather than re-enabling `enableScripts`
+globally.
+
+### 2. Dependencies
+
 ```bash
-bun add -d sass
+yarn add -D vite vite-plugin-shopify typescript @types/node sass \
+  eslint @eslint/js @typescript-eslint/eslint-plugin @typescript-eslint/parser \
+  npm-run-all postcss
 ```
 
-**Optional:** If using Tailwind CSS:
-```bash
-bun add -d tailwindcss
-```
+### 3. Scripts
 
-### Step 2: Configure package.json
-
-Edit your `package.json` to match this structure:
+Only create scripts for themes you actually push to from the CLI. A `deploy:staging`
+that targets a Shopify-managed theme is a footgun, not a convenience.
 
 ```json
 {
-  "name": "your-store-shopify",
-  "version": "1.0.0",
-  "type": "module",
-  "packageManager": "bun@1.3.0",
+  "packageManager": "yarn@4.18.0",
+  "engines": { "node": ">=20" },
   "scripts": {
-    "dev": "run-p -sr \"shopify:dev -- {@}\" \"vite:dev\" --",
-    "dev:staging": "run-p -sr \"shopify:dev:staging -- {@}\" \"vite:dev\" --",
-    "dev:production": "run-p -sr \"shopify:dev:production -- {@}\" \"vite:dev\" --",
-    "build": "bun vite:build",
-    "preview": "vite preview",
-    "deploy": "run-s \"vite:build\" \"shopify:push -- {@}\" --",
-    "deploy:staging": "run-s \"vite:build\" \"shopify:push:staging -- {@}\" --",
-    "deploy:production": "run-s \"vite:build\" \"shopify:push:production -- {@}\" --",
-    "shopify:dev": "shopify theme dev --environment development",
-    "shopify:dev:staging": "shopify theme dev --environment staging",
-    "shopify:dev:production": "shopify theme dev --environment production",
-    "shopify:push": "shopify theme push --environment development",
-    "shopify:push:staging": "shopify theme push --environment staging",
-    "shopify:push:production": "shopify theme push --environment production",
+    "dev": "run-p -sr \"shopify:dev\" \"vite:dev\" --",
+    "build": "vite build",
+    "deploy": "run-s \"build\" \"push\" --",
+    "push": "shopify theme push --environment development",
+    "pull": "shopify theme pull --environment development",
+    "shopify:dev": "shopify theme dev --environment development --live-reload=hot-reload",
     "vite:dev": "vite",
     "vite:build": "vite build",
-    "clean": "rm -rf dist assets/storefront.js assets/custom_styling.css"
-  },
-  "devDependencies": {
-    "@shopify/theme-check-node": "^2.0.0",
-    "autoprefixer": "^10.4.20",
-    "npm-run-all": "^4.1.5",
-    "postcss": "^8.4.47",
-    "sass": "^1.80.7",
-    "vite": "^5.4.10",
-    "vite-plugin-shopify": "^3.1.1"
+    "type-check": "tsc --noEmit",
+    "lint": "eslint frontend",
+    "clean": "rm -rf dist assets/storefront-*.js assets/styles-*.css assets/.vite"
   }
 }
 ```
 
-**Key Points:**
-- `"type": "module"` enables ES modules
-- `"packageManager": "bun@1.3.0"` locks Bun version
-- Scripts support multiple environments (development, staging, production)
-- `npm-run-all` enables parallel script execution (`run-p`) and sequential (`run-s`)
+### 4. `shopify.theme.toml`
 
----
+Gitignored. `password` is the **theme access token**; `store_password` is the
+**storefront password** for a password-protected store. They are different
+credentials and putting one in the other's field produces confusing failures.
 
-## Vite Configuration
-
-### Step 1: Create vite.config.js
-
-Create a `vite.config.js` file in your project root:
-
-```javascript
-import { fileURLToPath, URL } from 'node:url';
-import { defineConfig } from 'vite';
-import shopify from 'vite-plugin-shopify';
-
-export default defineConfig(() => ({
-  plugins: [
-    shopify({
-      // Theme root directory
-      themeRoot: './',
-      // Source code directory
-      sourceCodeDir: 'frontend',
-      // Entrypoints directory - vite-plugin-shopify will auto-discover files here
-      entrypointsDir: 'frontend/entrypoints',
-      // Additional entrypoints (optional)
-      additionalEntrypoints: [],
-    }),
-  ],
-  resolve: {
-    alias: {
-      '~': fileURLToPath(new URL('./frontend', import.meta.url)),
-    },
-  },
-  build: {
-    // IMPORTANT: Do not clear the assets folder - preserves existing Shopify theme assets
-    emptyOutDir: false,
-    manifest: true,
-    rollupOptions: {
-      output: {
-        // Clean output filenames without hashes for easier debugging
-        entryFileNames: '[name].js',
-        assetFileNames: '[name][extname]',
-        chunkFileNames: '[name].js',
-      }
-    }
-  },
-  server: {
-    // CORS headers for development
-    headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, HEAD, PUT, POST, PATCH, DELETE",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      "Access-Control-Allow-Credentials": "true"
-    },
-    cors: {
-      origin: ["*"],
-      methods: ["GET", "HEAD", "PUT", "POST, PATCH", "DELETE"],
-      credentials: true,
-      allowedHeaders: ["Content-Type", "Authorization"]
-    }
-  },
-  css: {
-    devSourcemap: true,
-    modules: {
-      localsConvention: 'camelCase'
-    },
-    preprocessorOptions: {
-      scss: {
-        additionalData: '@use "sass:math"; @use "sass:map";',
-        api: 'modern-compiler',
-        quietDeps: true,
-        logger: {
-          warn: () => { }
-        }
-      }
-    }
-  }
-}));
+```toml
+[environments.development]
+store = "<store>.myshopify.com"
+theme = "<dev theme id>"
+password = "shptka_..."       # theme access token
+store_password = "..."         # storefront password, only if the store is locked
 ```
 
-**Key Configuration Points:**
-- `sourceCodeDir: 'frontend'` - All custom code goes here
-- `emptyOutDir: false` - Preserves existing Shopify theme assets
-- `alias: '~'` - Import shortcut (e.g., `import '~/scripts/utils'`)
-- CORS headers allow local development with Shopify CLI
+Commit an `example.shopify.theme.toml` with empty credentials.
 
-### Step 2: Create postcss.config.js
+### 5. Wire the bundle into the layout
 
-Create a `postcss.config.js` file in your project root:
+This is the one unavoidable core-file edit. Add to `layout/theme.liquid`'s
+`<head>`, and record it in the debt table in `CLAUDE.md`:
 
-```javascript
-export default {
-  plugins: {
-    autoprefixer: {},
-  },
-}
+```liquid
+{%- render '<prefix>-theme-settings' -%}
+{%- render 'vite-tag' with 'styles.scss' -%}
+{%- render 'vite-tag' with 'storefront.ts' -%}
 ```
 
-**Optional:** If using Tailwind CSS, add:
-```javascript
-export default {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
-  },
-}
-```
-
----
-
-## Project Structure
-
-### Step 1: Create Frontend Directory Structure
-
-Create the following directory structure in your project root:
+### 6. Verify, then commit
 
 ```bash
-mkdir -p frontend/entrypoints
-mkdir -p frontend/scripts/components
-mkdir -p frontend/scripts/sections
-mkdir -p frontend/scripts/hooks
-mkdir -p frontend/scripts/hooks/core
-mkdir -p frontend/styles
-mkdir -p frontend/images
-mkdir -p frontend/fonts
+yarn type-check && yarn lint && yarn build
+shopify theme check          # compare against the baseline offence count
 ```
 
-### Step 2: Create Core Files
-
-#### 1. Create `frontend/entrypoints/storefront.js`
-
-This is your main JavaScript entry point:
-
-```javascript
-/**
- * Storefront JavaScript Entrypoint
- *
- * This is the main JavaScript entry point for the theme.
- * - Initializes global window.cinereo object (or use your store name)
- * - Imports and initializes all utilities and sections
- * - Sets up performance monitoring
- */
-
-import 'vite/modulepreload-polyfill';
-import { consoleMessage, reportWebVitals, initGlobalEvents, handleUrlParams } from '~/scripts/utils';
-import { registerSectionLifecycles } from '~/scripts/hooks/core/sectionRegistry';
-
-/**
- * Initialize global object
- * Replace 'cinereo' with your store name
- */
-window.yourStoreName = window.yourStoreName || {};
-
-// Settings
-window.yourStoreName.settings = {
-  devMode: true, // Enable development mode for console logging
-};
-
-// Theme configuration (will be populated from Liquid)
-window.yourStoreName.theme = {
-  shopName: window.Shopify?.shop || 'your-store',
-  currency: window.Shopify?.currency?.active || 'USD',
-  currencySymbol: '$',
-  moneyFormat: window.theme?.moneyFormat || '${{amount}}',
-};
-
-// Cart state
-window.yourStoreName.cart = {
-  count: window.Shopify?.cart?.item_count || 0,
-  total: window.Shopify?.cart?.total_price || 0,
-};
-
-// Event bus for custom events
-window.yourStoreName.events = window.yourStoreName.events || new EventTarget();
-
-// Utility functions reference
-window.yourStoreName.utils = {
-  consoleMessage,
-  handleUrlParams,
-};
-
-// Version
-window.yourStoreName.version = '1.0.0';
-
-consoleMessage('Store object initialized', 'info');
-
-/**
- * Initialize Application
- */
-const initializeApp = () => {
-  try {
-    consoleMessage('[InitializeApp] Starting application initialization', 'info');
-
-    // Initialize global event listeners
-    initGlobalEvents();
-    consoleMessage('[InitializeApp] Global events initialized', 'info');
-
-    // Register section lifecycles - handles both initial load and theme editor events
-    registerSectionLifecycles();
-    consoleMessage('[InitializeApp] Section lifecycles registered', 'info');
-
-    // Handle URL parameters
-    handleUrlParams();
-
-    // Update cart state from Shopify object
-    if (window.Shopify?.cart) {
-      window.yourStoreName.cart.count = window.Shopify.cart.item_count || 0;
-      window.yourStoreName.cart.total = window.Shopify.cart.total_price || 0;
-    }
-
-    consoleMessage('[InitializeApp] Application initialization complete', 'info', {
-      version: window.yourStoreName.version,
-      devMode: window.yourStoreName.settings.devMode,
-      cartCount: window.yourStoreName.cart.count
-    });
-  } catch (error) {
-    consoleMessage('[InitializeApp] Error during application initialization', 'error', error);
-  }
-};
-
-// Initialize app when DOM is ready
-window.addEventListener('DOMContentLoaded', initializeApp);
-
-// Report web vitals when page is fully loaded
-window.addEventListener('load', reportWebVitals);
-
-// Export for use in other modules
-export default window.yourStoreName;
-```
-
-#### 2. Create `frontend/entrypoints/custom_styling.css`
-
-This is your main CSS entry point:
-
-```css
-/**
- * Custom Styling Entrypoint
- *
- * This file imports all custom styles for the theme.
- * Vite will process and bundle all imports into a single CSS file.
- */
-
-/* ===========================
-   CSS Custom Properties (Variables)
-   =========================== */
-
-:root {
-  /* Add your custom CSS variables here */
-  --color-primary: rgb(var(--color-button));
-  --color-secondary: rgb(var(--color-accent));
-  --spacing-base: 1rem;
-  --spacing-small: 0.5rem;
-  --spacing-large: 2rem;
-  --transition-base: 200ms ease;
-  --border-radius: 4px;
-}
-
-/* ===========================
-   Component Imports
-   =========================== */
-
-/* Import your custom component styles here */
-/* Example: @import '../styles/cart-indicators.css'; */
-
-/* ===========================
-   Utility Classes
-   =========================== */
-
-/* Add utility classes here if needed */
-.visually-hidden {
-  position: absolute !important;
-  overflow: hidden;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  border: 0;
-  clip: rect(0 0 0 0);
-  word-wrap: normal !important;
-}
-```
-
-#### 3. Copy Core Utility Files
-
-You need to create several utility files. Copy the following from your existing CLAUDE.md context:
-
-**`frontend/scripts/utils.js`** - Contains helper functions like `consoleMessage`, `reportWebVitals`, `initGlobalEvents`, `handleUrlParams`
-
-**`frontend/scripts/hooks/helpers.js`** - Contains helper functions like `formatPrice`, `getUrlParam`, `removeUrlParam`
-
-**`frontend/scripts/hooks/useDebounce.js`** - Debounce utility hook
-
-**`frontend/scripts/hooks/useSectionLifecycle.js`** - Section lifecycle management hook
-
-**`frontend/scripts/hooks/core/sectionRegistry.js`** - Section registry for managing section lifecycles
-
-**`frontend/scripts/components/baseComponent.js`** - Base component class for extending
-
-**Note:** These files contain the core architecture for the theme. Request your coding agent to implement these files based on the patterns shown in the CLAUDE.md document.
-
-### Step 3: Create .gitkeep Files
-
-Create `.gitkeep` files to preserve empty directories:
-
-```bash
-touch frontend/scripts/sections/.gitkeep
-touch frontend/styles/.gitkeep
-touch frontend/images/.gitkeep
-touch frontend/fonts/.gitkeep
-```
-
-### Final Directory Structure
-
-Your project should now have this structure:
-
-```
-your-shopify-theme/
-├── .github/
-│   └── workflows/
-│       └── build.yml
-├── .gitignore
-├── .shopifyignore
-├── assets/                          # Built assets (auto-generated)
-├── config/
-├── frontend/                        # Source code (YOU WORK HERE)
-│   ├── entrypoints/
-│   │   ├── storefront.js           # Main JS entry
-│   │   └── custom_styling.css      # Main CSS entry
-│   ├── scripts/
-│   │   ├── components/             # Reusable components
-│   │   │   └── baseComponent.js
-│   │   ├── hooks/                  # Shared utilities & hooks
-│   │   │   ├── core/
-│   │   │   │   └── sectionRegistry.js
-│   │   │   ├── helpers.js
-│   │   │   ├── useDebounce.js
-│   │   │   └── useSectionLifecycle.js
-│   │   ├── sections/               # Section-specific code
-│   │   │   └── .gitkeep
-│   │   └── utils.js
-│   ├── styles/                     # Component styles
-│   │   └── .gitkeep
-│   ├── images/
-│   └── fonts/
-├── layout/
-├── locales/
-├── sections/
-├── snippets/
-│   └── vite-tag.liquid             # Auto-generated by vite-plugin-shopify
-├── templates/
-├── bun.lockb                       # Bun lock file
-├── package.json
-├── postcss.config.js
-├── vite.config.js
-├── CLAUDE.md                       # Project guidelines (create this)
-└── project_setup.md                # This file
-```
+Commit source **and** built assets together. CI verifies they match.
 
 ---
 
-## Git Configuration
+## The namespace rule
 
-### Step 1: Create .gitignore
+Every custom Liquid file carries the project prefix:
 
-Create a `.gitignore` file in your project root:
+| Kind | Path |
+|---|---|
+| Snippets | `snippets/<prefix>-*.liquid` |
+| Sections | `sections/<prefix>-*.liquid` |
+| Styles / scripts | `frontend/**`, compiled into `assets/` |
 
-```gitignore
-# Node.js dependencies
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+An upgrade then becomes: overwrite every non-prefixed file, and whatever survives
+is yours. Without it, an upgrade is a hand-merge of every file you ever touched.
 
-# Environment variables
-.env
-.env.local
-.env.*.local
-.env.development.local
-.env.test.local
-.env.production.local
+**Core files get additive edits only, and each one is a debt.** Keep a table in
+`CLAUDE.md`:
 
-# Vite
-dist/
-dist-ssr/
-*.local
-.vite/
+| File | Change | Why unavoidable |
+|---|---|---|
+| `layout/theme.liquid` | Renders the settings snippet and `vite-tag` | No extension point for adding to `<head>` |
+| `config/settings_schema.json` | Appends one settings group at the end | Global settings have no other home |
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-.idea/
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Before editing any other core file, try a theme setting, a section, a block, or a
+metafield first. Those survive updates untouched.
 
-# OS files
-Thumbs.db
-.DS_Store
-*~
-.Spotlight-V100
-.Trashes
+### Applying an upgrade
 
-# Shopify theme files
-config/settings_data.json
-# Note: shopify.theme.toml is added automatically at the END of setup
-# This allows you to review and commit it to private repos if desired before it's ignored
-
-# Build artifacts
-*.log
-*.tsbuildinfo
-
-# Optional: Shopify CLI files (uncomment if needed)
-# .shopify/
-
-# Lock files (keep only one - Bun in this case)
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-```
-
-### Step 2: Create .shopifyignore
-
-Create a `.shopifyignore` file to exclude source files from theme uploads:
-
-```gitignore
-# Shopify Ignore - Files to exclude from theme uploads
-
-# Node modules
-node_modules/
-
-# Source files (Vite will build these)
-frontend/
-
-# Config files
-vite.config.js
-postcss.config.js
-tailwind.config.js
-package.json
-bun.lockb
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-
-# Build configs
-.vite/
-tsconfig.json
-.eslintrc*
-.prettierrc*
-
-# Git files
-.git/
-.gitignore
-.gitattributes
-
-# CI/CD
-.github/
-
-# Documentation
-README.md
-CLAUDE.md
-project_setup.md
-*.md
-
-# Environment files
-.env*
-
-# Editor directories
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS files
-.DS_Store
-Thumbs.db
-```
-
-**Key Point:** The `.shopifyignore` ensures that only built assets are uploaded to Shopify, not source code.
+1. Branch from `main`.
+2. Pull the new base release over the working tree.
+3. Restore the prefixed files and re-apply the debt table.
+4. Confirm `config/settings_data.json` still holds the merchant's values.
+5. `yarn build`, then load the styleguide page — it renders every shared snippet,
+   so a renamed token shows up there first.
+6. `shopify theme check` — compare against the recorded baseline.
 
 ---
 
-## GitHub Actions CI/CD
+## Branches, themes and who owns what
 
-### Step 1: Create GitHub Actions Workflow
+`main` (production), `staging`, `qa`. Feature branches cut from `main`.
 
-Create `.github/workflows/build.yml`:
+When the GitHub integration is connected, Shopify owns those three themes. CI's
+job on those branches is to compile `frontend/` and **commit the built assets back
+to the branch**, because that commit is what Shopify syncs.
 
 ```yaml
-name: Build Vite Assets
+name: Build
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, staging, qa]
   pull_request:
-    branches: [main, develop]
+    branches: [main, staging, qa]
+
+# Assets derive entirely from source, so only the newest push per branch is worth
+# building. Cancelling superseded runs also stops two of them racing to push their
+# asset commit, which leaves one rejected with "fetch first".
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
+    # Without this guard, the workflow's own asset commit triggers another build.
+    if: github.actor != 'github-actions[bot]' && github.actor != 'shopify[bot]'
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
+      - uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: '22'
 
-      - name: Install dependencies
-        run: bun install
+      # Corepack must be enabled before any yarn call. setup-node's built-in yarn
+      # cache runs earlier and would probe the runner's preinstalled Yarn 1.
+      - run: corepack enable
 
-      - name: Build Vite assets
-        run: bun run build
+      - id: yarn-cache
+        run: echo "dir=$(yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
 
-      - name: Check for uncommitted changes in assets
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: yarn-${{ runner.os }}-
+
+      - run: yarn install --immutable
+      - run: yarn type-check
+      - run: yarn lint
+      - run: yarn build
+
+      - name: Commit built assets
+        if: github.event_name == 'push'
+        id: commit
         run: |
-          git diff --exit-code assets/ || \
-          (echo "Error: Built assets are out of sync. Run 'bun run build' locally and commit the changes." && exit 1)
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A assets snippets/vite-tag.liquid
+          if [[ -n $(git status --porcelain) ]]; then
+            git commit -m "chore(assets): compile theme assets"
+            echo "changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Upload assets artifact
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: built-assets
-          path: assets/
-          retention-days: 7
-```
+      - name: Push built assets
+        if: github.event_name == 'push' && steps.commit.outputs.changes == 'true'
+        run: |
+          for attempt in 1 2 3; do
+            git push origin HEAD:${{ github.ref_name }} && exit 0
+            git fetch origin ${{ github.ref_name }}
+            # In a rebase 'theirs' is the commit being replayed — the assets this
+            # run just built, which is the correct winner for generated output.
+            git rebase -X theirs origin/${{ github.ref_name }} || {
+              git rebase --abort; exit 1;
+            }
+          done
+          exit 1
 
-**What this workflow does:**
-1. Runs on push/PR to main or develop branches
-2. Sets up Bun
-3. Installs dependencies
-4. Builds Vite assets
-5. Checks if built assets are committed (fails if not)
-6. Uploads assets as artifacts
-
-### Step 2: Commit Workflow
-
-```bash
-git add .github/workflows/build.yml
-git commit -m "Add GitHub Actions workflow for Vite builds"
-```
-
----
-
-## Development Workflow
-
-### Initial Build
-
-Before starting development, build the assets once:
-
-```bash
-bun run build
-```
-
-This generates:
-- `assets/storefront.js`
-- `assets/custom_styling.css`
-- `snippets/vite-tag.liquid` (auto-generated)
-
-### Start Development Server
-
-In one terminal, start Vite:
-```bash
-bun run dev
-```
-
-This runs both:
-- `vite` (development server on http://localhost:5173)
-- `shopify theme dev` (Shopify preview)
-
-### Making Changes
-
-1. Edit files in `frontend/` directory
-2. Vite hot-reloads changes automatically
-3. Changes appear instantly in Shopify preview
-
-### Build for Production
-
-When ready to deploy:
-
-```bash
-bun run build
-```
-
-**IMPORTANT:** Always commit built assets before pushing:
-
-```bash
-git add assets/
-git commit -m "Build: Updated assets"
-git push
-```
-
-### Deploy to Shopify
-
-Deploy to development environment:
-```bash
-bun run deploy
-```
-
-Deploy to staging:
-```bash
-bun run deploy:staging
-```
-
-Deploy to production:
-```bash
-bun run deploy:production
+      - name: Verify assets are in sync (PR)
+        if: github.event_name == 'pull_request'
+        run: git diff --exit-code assets/ snippets/vite-tag.liquid
 ```
 
 ---
 
-## Code Style Guidelines
+## Theme settings
 
-### CSS Guidelines
+Custom settings live in **one group appended last** in
+`config/settings_schema.json`, every id prefixed. Appending at the end keeps
+re-applying it after an upgrade a copy-paste rather than a merge.
 
-#### 1. Use Semantic Class Names
+Getting them into JS does not require touching Liquid again. A
+`<prefix>-theme-settings.liquid` snippet serialises the group to JSON, and a typed
+reader parses it:
 
-**Always use semantic, descriptive class names that describe purpose, not appearance.**
-
-**❌ WRONG:**
 ```liquid
-<div class="flex justify-center text-blue bg-white p-4">
-  <h2 class="text-2xl font-bold">Title</h2>
-</div>
+<script type="application/json" id="<prefix>-settings">
+  { "revealEnabled": {{ settings.<prefix>_reveal_enabled | default: true | json }} }
+</script>
 ```
 
-**✅ CORRECT:**
-```liquid
-<div class="header-container">
-  <h2 class="header-title">Title</h2>
-</div>
-```
+Keep defaults in the TypeScript reader as well as the schema, so the bundle still
+runs against a theme that predates a setting. Malformed JSON should log and fall
+back, never throw.
 
-```css
-.header-container {
-  display: flex;
-  justify-content: center;
-  background-color: var(--color-background);
-  padding: 1rem;
-}
+Prefer a **section** setting over a global one. Global settings are the only
+reason `settings_schema.json` is a file you re-apply on every upgrade.
 
-.header-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  font-family: var(--font-heading);
-}
-```
+### Deprecating a setting
 
-#### 2. Mobile-First Approach
+Shopify has no native deprecation flag, so this is a convention.
 
-Always start with mobile styles, then add responsive breakpoints:
+Never delete an id outright. Merchant values live in `config/settings_data.json`,
+and Liquid reading a removed id returns `nil` silently — it surfaces as content
+quietly disappearing, not an error.
 
-```css
-.card {
-  padding: 1rem; /* Mobile */
-}
+1. Move it under a `Deprecated` header at the bottom of the group.
+2. Prefix the label `Deprecated — `.
+3. Put the replacement and intended removal date in `info`.
+4. Gate it: `"visible_if": "{{ settings.<prefix>_show_deprecated == true }}"`.
+5. Keep the code reading it, falling back to the replacement.
+6. Track it in a table in `CLAUDE.md` until it is safe to remove.
 
-@media (min-width: 768px) {
-  .card {
-    padding: 1.5rem; /* Tablet */
-  }
-}
+Deleting the schema entry does **not** delete the stored value. Re-adding the same
+id later resurrects the old value, which is a genuinely confusing bug to chase.
 
-@media (min-width: 1024px) {
-  .card {
-    padding: 2rem; /* Desktop */
-  }
-}
-```
+---
 
-#### 3. Use CSS Custom Properties
+## Architecture
 
-Leverage CSS variables for consistency:
+### Two-step component construction
 
-```css
-:root {
-  --color-primary: rgb(var(--color-button));
-  --spacing-base: 1rem;
-  --transition-base: 200ms ease;
-}
+A subclass's field initialisers do not run until after `super()` returns. If the
+base constructor calls `init()`, every subclass field is `undefined` inside it.
+This is not theoretical — it shipped in an earlier version of this template and
+crashed the first component built on it.
 
-.button-primary {
-  background-color: var(--color-primary);
-  padding: var(--spacing-base);
-  transition: background-color var(--transition-base);
-}
-```
+So the constructor only stores arguments, and `mount()` resolves config and runs
+`init()`:
 
-### JavaScript Guidelines
+```typescript
+export abstract class BaseComponent<TConfig extends BaseConfig = BaseConfig> {
+  /** The minifier mangles this.constructor.name, so subclasses declare their own. */
+  protected abstract readonly componentName: string;
 
-#### 1. Use camelCase for Functions and Variables
+  protected readonly container: HTMLElement;
+  protected config!: TConfig;
+  private readonly overrides?: Partial<TConfig>;
 
-**All JavaScript must use camelCase naming:**
-
-```javascript
-// ✅ CORRECT
-function initProductForm() {}
-function handleAddToCart() {}
-const cartItems = [];
-
-// ❌ WRONG
-function init_product_form() {}
-function handle-add-to-cart() {}
-```
-
-#### 2. Class-Based Components
-
-Use class-based components for reusable functionality:
-
-```javascript
-import { BaseComponent } from '~/scripts/components/baseComponent';
-
-export class ProductCard extends BaseComponent {
-  constructor(selector) {
-    super(selector);
+  constructor(container: HTMLElement, config?: Partial<TConfig>) {
+    this.container = container;
+    this.overrides = config;
   }
 
-  setupElement(element) {
-    const addToCartBtn = element.querySelector('.add-to-cart-btn');
-    if (addToCartBtn) {
-      addToCartBtn.addEventListener('click', this.handleAddToCart.bind(this));
-    }
-  }
-
-  handleAddToCart(event) {
-    event.preventDefault();
-    // Add to cart logic
-  }
-
-  destroy() {
-    // Cleanup event listeners
-    super.destroy();
+  public mount(): this {
+    if (this.mounted || this.destroyed) return this;
+    this.config = { ...this.getDefaultConfig(), ...this.overrides };
+    this.mounted = true;
+    this.init();
+    return this;
   }
 }
 ```
 
-#### 3. Use useSectionLifecycle for Sections
+Always register via the `mountComponent()` helper so the second step cannot be
+forgotten:
 
-All section-specific code should use the `useSectionLifecycle` hook:
-
-```javascript
-import { useSectionLifecycle } from '~/scripts/hooks/useSectionLifecycle';
-
-useSectionLifecycle('hero-section', {
-  onLoad: (root) => {
-    console.log('Hero section loaded', root);
-    // Initialize component
-  },
-  onUnload: (root, instance) => {
-    console.log('Hero section unloaded');
-    // Cleanup
-  }
+```typescript
+useSectionLifecycle('cart-drawer', {
+  mount: 'visible',
+  onLoad: mountComponent(CartDrawer),
+  onUnload: (_root, instance) => (instance as CartDrawer)?.destroy(),
 });
 ```
 
-### Naming Conventions
+`getDefaultConfig()` must return literals — it runs before `init()` and cannot
+read instance fields.
 
-1. **JavaScript**:
-   - Classes: PascalCase (`ProductCard`)
-   - Functions: camelCase (`initCart`)
-   - Variables: camelCase (`cartItems`)
+### Mount strategies
 
-2. **CSS**: kebab-case for class names
-   ```css
-   .product-card {}
-   .btn-primary {}
-   ```
+| Strategy | Runs | Use for |
+|---|---|---|
+| `eager` (default) | during registration | above-the-fold content |
+| `idle` | `requestIdleCallback` | analytics, prefetch |
+| `visible` | `IntersectionObserver` | everything below the fold |
 
-3. **Liquid Files**: kebab-case
-   ```
-   product-card.liquid
-   featured-collection.liquid
-   ```
+Pending `idle`/`visible` mounts must be cancelled on unload, or the theme editor
+fires a callback at a detached root.
 
-4. **File Names**:
-   - JavaScript: camelCase (`productCard.js`)
-   - CSS: kebab-case (`product-card.css`)
-   - Liquid: kebab-case (`product-card.liquid`)
+### Wiring a section in Liquid
 
----
+Horizon has no `data-section-type` convention — Shopify only wraps sections in
+`#shopify-section-{{ section.id }}`. A `<prefix>-section-attrs` snippet emits what
+the registry binds to:
 
-## Documentation
-
-### Create CLAUDE.md
-
-Create a `CLAUDE.md` file in your project root with project-specific guidelines. This file should contain:
-
-1. **Project Overview** - Description of the theme and its purpose
-2. **Development Setup** - How to get started
-3. **CSS & Styling Guidelines** - Specific rules for this project
-4. **JavaScript Architecture** - Patterns and conventions
-5. **Shopify Best Practices** - Theme-specific recommendations
-6. **File Organization** - Where different types of code belong
-7. **Code Quality Standards** - Testing and accessibility requirements
-
-**IMPORTANT:** The `CLAUDE.md` file should be your source of truth for project conventions. Update it as your project evolves.
-
-**Key Instructions to Include in CLAUDE.md:**
-
-- **Always use mobile-first CSS** with media queries for responsive design
-- **Use semantic class names** - NO utility-based class names
-- **ALL custom CSS and JavaScript MUST be created in `frontend/`**, not directly in `assets/`
-- Use `camelCase` for all JavaScript functions and variables
-- Import all custom styles in `frontend/entrypoints/custom_styling.css`
-- Import all custom scripts in `frontend/entrypoints/storefront.js`
-
-### Create README.md
-
-Create a `README.md` with:
-
-- Project name and description
-- Installation instructions
-- Development workflow
-- Deployment instructions
-- Team contact information
-
----
-
-## Post-Setup Checklist
-
-After completing this setup, verify everything is working:
-
-- [ ] Dependencies installed (`bun install`)
-- [ ] Vite config created and validated
-- [ ] Frontend directory structure created
-- [ ] Core entry files created (storefront.js, custom_styling.css)
-- [ ] Git configured (.gitignore, .shopifyignore)
-- [ ] GitHub Actions workflow created
-- [ ] Initial build successful (`bun run build`)
-- [ ] Development server starts (`bun run dev`)
-- [ ] Shopify CLI connects to store
-- [ ] Hot reload works (edit CSS/JS and see changes)
-- [ ] CLAUDE.md created with project guidelines
-- [ ] README.md created with project info
-
----
-
-## Common Issues and Solutions
-
-### Issue: Vite not finding imports
-
-**Solution:** Check your `vite.config.js` alias configuration:
-```javascript
-alias: {
-  '~': fileURLToPath(new URL('./frontend', import.meta.url)),
-}
+```liquid
+<div {% render '<prefix>-section-attrs', type: 'cart-drawer', id: section.id %}>
 ```
 
-### Issue: Assets not updating in Shopify preview
+`id` must be passed explicitly. `{% render %}` creates an isolated scope, so
+`section` is not visible inside the snippet — omit it and `data-section-id` renders
+empty, which makes every instance of that type collide on one registry key. The
+registry should also fall back to a per-element identity for any falsy id.
 
-**Solution:**
-1. Clear browser cache
-2. Restart Vite dev server
-3. Check `snippets/vite-tag.liquid` exists and is included in `layout/theme.liquid`
+### Diagnostics
 
-### Issue: Build fails in GitHub Actions
+Expose a debug surface on the global object. The one that earns its keep is a
+check for **which bundle is actually running** — `import.meta.env.DEV` is true only
+in the Vite-served build, so it cannot be fooled by a stale asset:
 
-**Solution:**
-1. Run `bun run build` locally
-2. Commit built assets: `git add assets/ && git commit -m "Build: Update assets"`
-3. Push to GitHub
+```js
+STOREFRONT.debug.info()        // source: 'local vite dev server' | 'compiled theme asset'
+STOREFRONT.debug.sections()    // registered types, found vs mounted
+STOREFRONT.debug.vitals()      // Core Web Vitals so far
+STOREFRONT.debug.devMode(true) // enable logging, persisted
+```
 
-### Issue: CORS errors in development
+`found` vs `mounted` is the single most useful diagnostic: a section that renders
+but never mounts is otherwise invisible.
 
-**Solution:** Ensure `vite.config.js` has CORS headers configured (see configuration above)
+**Error-level logs must never be gated behind a debug flag.** A swallowed
+initialisation error is exactly the one you need to see.
 
----
+### Styleguide
 
-## AI Agent System
+Ship a `page.styleguide` template rendering a `<prefix>-styleguide` section that
+displays every shared snippet against the theme's live CSS custom properties.
 
-This project includes specialized Claude subagents in `.claude/agents/` that assist with different aspects of development:
-
-### Available Agents
-
-| Agent | Purpose | When to Use |
-|-------|---------|-------------|
-| `ui-design` | UI/UX design & CSS/SCSS | Designing components, creating styles, responsive layouts, design tokens |
-| `tailwind` | Tailwind CSS specialist | Only when Tailwind is chosen; uses @apply, never inline utilities |
-| `code-writer` | JavaScript & Liquid implementation | Writing components, sections, features, common snippets |
-| `accessibility` | WCAG compliance & a11y | Interactive components, forms, modals, navigation |
-| `liquid` | Shopify Liquid templates | Section schemas, metafields, Ajax API, template optimization |
-| `performance` | Core Web Vitals & speed | LCP/CLS/INP optimization, lazy loading, image optimization |
-
-### Agent Guidelines
-
-- **UI Design Agent**: Creates mobile-first CSS/SCSS with semantic BEM naming. Generates design tokens from theme settings.
-- **Tailwind Agent**: Only active when Tailwind is configured. Uses `@apply` in CSS files, never inline utilities in HTML/Liquid.
-- **Code Writer Agent**: Enforces 500-line soft limit, uses `BaseComponent` pattern, implements section lifecycles, provides common snippet patterns.
-- **Accessibility Agent**: Reviews for WCAG 2.1 AA compliance, implements keyboard navigation and screen reader support.
-- **Liquid Agent**: Optimizes Liquid templates, handles metafields/metaobjects, implements Ajax API patterns.
-- **Performance Agent**: Optimizes Core Web Vitals, implements lazy loading, handles image optimization with Shopify CDN.
-
-### Agent Collaboration
-
-Agents can work together:
-1. **UI Design** designs component → **Code Writer** implements functionality
-2. **Code Writer** builds component → **Accessibility** reviews for a11y
-3. **UI Design** creates styles → **Tailwind** converts to @apply patterns (if Tailwind enabled)
-4. **Liquid** creates templates → **Performance** optimizes for Core Web Vitals
-5. **Performance** identifies issues → **Code Writer** implements lazy loading
+It is built from the same snippets production uses, so it doubles as the upgrade
+smoke test. Add a shared snippet, add it to the styleguide.
 
 ---
 
-## Summary
+## Gotchas that have actually bitten us
 
-This setup provides:
-
-✅ **Modern Build System** - Vite for fast development and optimized builds
-✅ **Flexible Package Manager** - Choose Bun, npm, pnpm, or yarn
-✅ **Organized Structure** - Clear separation of source and build files
-✅ **Hot Reload** - Instant feedback during development
-✅ **CI/CD Pipeline** - Automated builds and checks via GitHub Actions
-✅ **Flexible Styling** - Support for CSS, SCSS, or Tailwind
-✅ **Type Safety Option** - Easy to add TypeScript if needed
-✅ **Best Practices** - Semantic CSS, camelCase JS, mobile-first design
-✅ **Theme Editor Support** - Section lifecycle hooks for seamless customization
-✅ **Secure Configuration** - TOML file handling with gitignore protection
-✅ **Code Quality Tools** - ESLint + Prettier or Theme Check for linting
-✅ **Git Hooks** - Husky + lint-staged for pre-commit checks
-✅ **AI Agent System** - 6 specialized subagents for design, code, Liquid, performance, and accessibility
-
-**Next Steps:**
-
-1. Complete the setup checklist above
-2. Create your first component in `frontend/scripts/components/`
-3. Add custom styles in `frontend/styles/`
-4. Import them in the entrypoint files
-5. Build and deploy!
+1. **`.shopifyignore` needs globs.** `frontend/` does not match anything; it must
+   be `frontend/**`. A bare directory name silently uploads your source.
+2. **`yarn dev` rewrites `snippets/vite-tag.liquid`** to point at
+   `127.0.0.1:5173`. Committing it in that state breaks the theme for everyone
+   else. `yarn build` restores it.
+3. **`assets/.vite/manifest.json` must be committed.** The cleanup plugin reads it
+   to delete the previous build's hashed assets; without it, CI has no record and
+   old assets accumulate forever. A blanket `.vite/` ignore swallows it.
+4. **Shopify rejects subfolders under `assets/`**, so `assets/.vite/**` must be in
+   `.shopifyignore` even though it is committed to Git.
+5. **`config/settings_data.json` is not scratch.** See decision 3.
+6. **Check theme roles before pushing.** `shopify theme push` refuses to write to a
+   live theme without `--allow-live`; leave that guard in place.
+7. **A stray `package.json` in `$HOME`** makes Yarn 4 treat any repo beneath it as
+   a nested workspace and refuse to install. An empty `yarn.lock` in the project
+   resolves it.
+8. **Build unminified** (`minify: false`, `cssMinify: false`) so compiled assets
+   stay readable and patchable in the Shopify editor. Costs ~2-3x raw bytes; the
+   CDN still serves gzip.
 
 ---
 
-**Version:** 1.0.0
-**Last Updated:** October 2025
-**Maintained By:** Mikhail Arden
+## Post-setup checklist
+
+- [ ] Baseline commit is the unmodified theme, with base version recorded
+- [ ] `config/settings_data.json` tracked (if GitHub integration is connected)
+- [ ] `assets/.vite/manifest.json` tracked, and in `.shopifyignore`
+- [ ] `.shopifyignore` entries all use `/**`
+- [ ] `shopify.theme.toml` gitignored; `example.` version committed
+- [ ] Namespace prefix chosen and used by every custom Liquid file
+- [ ] Core-file debt table in `CLAUDE.md` matches reality
+- [ ] `yarn type-check && yarn lint && yarn build` pass
+- [ ] `shopify theme check` baseline offence count recorded
+- [ ] Styleguide page renders every shared snippet
+- [ ] `STOREFRONT.debug.sections()` shows `found === mounted`
+- [ ] CI green, and its asset commit lands on the branch
+
+---
+
+**Maintained by:** Mikhail Arden

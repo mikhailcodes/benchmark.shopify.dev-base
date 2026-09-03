@@ -1,0 +1,11 @@
+{
+  "projectName": "acme-store",
+  "namespace": "acme",
+  "themeSource": "existing",
+  "githubIntegration": true,
+  "storeUrl": "acme.myshopify.com",
+  "storePassword": "shptka_xxx",
+  "storefrontPassword": "",
+  "environmentName": "development",
+  "themeId": "123456789"
+}
