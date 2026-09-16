@@ -567,6 +567,7 @@ async function createDirectoryStructure(config: SetupConfig): Promise<void> {
     'frontend/scripts/types',
     'frontend/scripts/constants',
     'frontend/scripts/utils',
+    'frontend/styles/utils',
     'frontend/styles/sections',
     'frontend/styles/components',
     '.github/workflows',
@@ -626,18 +627,23 @@ enableGlobalCache: true
 async function installDependencies(): Promise<void> {
   header('Installing Dependencies');
 
+  // typescript and eslint are pinned: @typescript-eslint 8 does not support
+  // TypeScript 7, and TypeScript 7 rejects the tsconfig baseUrl the path aliases
+  // rely on. autoprefixer is what postcss.config.js loads.
   const _deps = [
     'vite',
     'vite-plugin-shopify',
-    'typescript',
+    'typescript@^5',
     '@types/node',
     'sass',
-    'eslint',
-    '@eslint/js',
+    'eslint@^9',
+    '@eslint/js@^9',
     '@typescript-eslint/eslint-plugin',
     '@typescript-eslint/parser',
+    'globals',
     'npm-run-all',
     'postcss',
+    'autoprefixer',
   ];
 
   try {
@@ -658,7 +664,8 @@ async function createViteConfig(config: SetupConfig): Promise<void> {
   const _scssPreprocessor = `
     preprocessorOptions: {
       scss: {
-        additionalData: '@use "sass:math"; @use "sass:map";',
+        // Lets partials say \`@use 'utils' as u\` instead of counting ../ hops.
+        loadPaths: ['frontend/styles'],
         api: 'modern-compiler',
         quietDeps: true,
         logger: {
@@ -786,6 +793,7 @@ async function createTypeScriptConfig(): Promise<void> {
       isolatedModules: true,
       verbatimModuleSyntax: true,
       lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+      types: ['vite/client', 'node'],
       baseUrl: '.',
       paths: {
         '~/*': ['./frontend/*'],
@@ -965,6 +973,238 @@ function toPascalCase(value: string): string {
     .join('');
 }
 
+async function createEslintConfig(): Promise<void> {
+  header('Creating ESLint Configuration');
+
+  const _config = `import js from '@eslint/js';
+import globals from 'globals';
+import tsParser from '@typescript-eslint/parser';
+import tsPlugin from '@typescript-eslint/eslint-plugin';
+
+export default [
+  { ignores: ['assets/**', 'dist/**', 'node_modules/**', '.yarn/**'] },
+  js.configs.recommended,
+  {
+    files: ['frontend/**/*.ts'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+        project: './tsconfig.json',
+      },
+      globals: globals.browser,
+    },
+    plugins: { '@typescript-eslint': tsPlugin },
+    rules: {
+      ...tsPlugin.configs.recommended.rules,
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_$' }],
+      '@typescript-eslint/no-explicit-any': 'warn',
+      'no-console': ['error', { allow: ['warn', 'error'] }],
+    },
+  },
+  {
+    // consoleMessage() is the sanctioned logging wrapper, so it owns the console calls.
+    files: ['frontend/scripts/utils/index.ts'],
+    rules: { 'no-console': 'off' },
+  },
+];
+`;
+
+  await writeFile('eslint.config.js', _config);
+  log('Created: eslint.config.js', colors.green);
+}
+
+async function createStyleHelpers(): Promise<void> {
+  header('Creating SCSS Helpers');
+
+  const _unit = `@use 'sass:list';
+@use 'sass:math';
+@use 'sass:meta';
+
+$base-font-size: 16 !default;
+
+@function strip-unit($value) {
+  @if meta.type-of($value) == 'number' and not math.is-unitless($value) {
+    @return math.div($value, ($value * 0 + 1));
+  }
+
+  @return $value;
+}
+
+/// rem(16) -> 1rem. Accepts a list: rem(16 24) -> 1rem 1.5rem.
+@function rem($values) {
+  $result: ();
+
+  @each $value in $values {
+    @if meta.type-of($value) == 'number' {
+      $value: math.div(strip-unit($value), $base-font-size) * 1rem;
+    }
+
+    $result: list.append($result, $value);
+  }
+
+  @if list.length($result) == 1 {
+    @return list.nth($result, 1);
+  }
+
+  @return $result;
+}
+
+@function rem-calc($values) {
+  @return rem($values);
+}
+`;
+
+  const _vwCalc = `@use 'sass:list';
+@use 'sass:math';
+@use 'sass:meta';
+@use './unit' as unit;
+
+$min-viewport: 390 !default;
+$max-viewport: 1728 !default;
+
+/// Fluid size that scales linearly with the viewport and clamps at both ends.
+/// fluid(16, 32) -> 16px at 390px wide, 32px at 1728px wide.
+/// A three-value list is accepted for parity with older call sites; the middle
+/// value is the midpoint reference only and does not bend the curve.
+@function fluid($min, $max: null) {
+  @if $max == null {
+    @if meta.type-of($min) != 'list' {
+      @error 'fluid() needs a min and max, or a list of sizes.';
+    }
+
+    $max: list.nth($min, list.length($min));
+    $min: list.nth($min, 1);
+  }
+
+  $min-px: unit.strip-unit($min);
+  $max-px: unit.strip-unit($max);
+
+  $slope: math.div($max-px - $min-px, $max-viewport - $min-viewport);
+  $intercept: $min-px - $slope * $min-viewport;
+
+  @return clamp(
+    #{unit.rem($min-px)},
+    #{unit.rem($intercept)} + #{$slope * 100}vw,
+    #{unit.rem($max-px)}
+  );
+}
+`;
+
+  const _mq = `@use 'sass:map';
+
+$breakpoints: (
+  'sm': 640px,
+  'md': 768px,
+  'lg': 1024px,
+  'xl': 1280px,
+  'xxl': 1440px,
+) !default;
+
+@function breakpoint($name) {
+  @if not map.has-key($breakpoints, $name) {
+    @error 'Breakpoint "#{$name}" not found. Available: #{map.keys($breakpoints)}.';
+  }
+
+  @return map.get($breakpoints, $name);
+}
+
+@mixin min($name) {
+  @media screen and (min-width: #{breakpoint($name)}) {
+    @content;
+  }
+}
+
+@mixin max($name) {
+  @media screen and (max-width: #{breakpoint($name) - 0.02px}) {
+    @content;
+  }
+}
+
+@mixin between($min, $max) {
+  @media screen and (min-width: #{breakpoint($min)}) and (max-width: #{breakpoint($max) - 0.02px}) {
+    @content;
+  }
+}
+
+@mixin reduced-motion {
+  @media (prefers-reduced-motion: reduce) {
+    @content;
+  }
+}
+`;
+
+  const _tokens = `@use 'sass:map';
+@use './unit' as unit;
+@use './vw-calc' as vw;
+
+$colors: (
+  'primary': rgb(var(--color-button)),
+  'secondary': rgb(var(--color-accent)),
+  'text': #1a1a1a,
+  'text-muted': #666666,
+  'surface': #ffffff,
+  'border': #e5e5e5,
+) !default;
+
+// Small steps stay fixed; anything big enough to affect layout rhythm scales
+// with the viewport so a section is not padded the same on a phone and a 27".
+$spacing: (
+  'xs': unit.rem(4),
+  'sm': unit.rem(8),
+  'md': unit.rem(16),
+  'lg': vw.fluid(24, 40),
+  'xl': vw.fluid(40, 80),
+  'xxl': vw.fluid(64, 128),
+) !default;
+
+$transitions: (
+  'fast': 150ms ease,
+  'base': 250ms ease,
+  'slow': 400ms ease,
+) !default;
+
+$radii: (
+  'sm': unit.rem(4),
+  'md': unit.rem(8),
+  'lg': unit.rem(16),
+  'pill': 999px,
+) !default;
+
+@function color($key) {
+  @return map.get($colors, $key);
+}
+
+@function spacing($key) {
+  @return map.get($spacing, $key);
+}
+
+@function transition($key) {
+  @return map.get($transitions, $key);
+}
+
+@function radius($key) {
+  @return map.get($radii, $key);
+}
+`;
+
+  const _index = `@forward './unit';
+@forward './vw-calc';
+@forward './mq';
+@forward './tokens';
+`;
+
+  await writeFile('frontend/styles/utils/_unit.scss', _unit);
+  await writeFile('frontend/styles/utils/_vw-calc.scss', _vwCalc);
+  await writeFile('frontend/styles/utils/_mq.scss', _mq);
+  await writeFile('frontend/styles/utils/_tokens.scss', _tokens);
+  await writeFile('frontend/styles/utils/_index.scss', _index);
+
+  log('Created: frontend/styles/utils/ (unit, vw-calc, mq, tokens)', colors.green);
+}
+
 async function createEntrypoints(config: SetupConfig): Promise<void> {
   header('Creating Entry Points');
 
@@ -1071,69 +1311,25 @@ import '@/components/sections';
   await writeFile('frontend/entrypoints/storefront.ts', _storefront);
   log('Created: frontend/entrypoints/storefront.ts', colors.green);
 
-  const _styles = `// Sass requires every @use before any other rule, so partials load here rather
-// than at the end of the file.
-@use '../styles/sections/${config.namespace}-example';
-
-$colors: (
-  'primary': rgb(var(--color-button)),
-  'secondary': rgb(var(--color-accent)),
-  'text': #1a1a1a,
-  'text-muted': #666,
-  'surface': #ffffff,
-  'border': #e5e5e5,
-);
-
-$spacing: (
-  'xs': 0.25rem,
-  'sm': 0.5rem,
-  'md': 1rem,
-  'lg': 2rem,
-  'xl': 4rem,
-);
-
-$breakpoints: (
-  'sm': 640px,
-  'md': 768px,
-  'lg': 1024px,
-  'xl': 1280px,
-);
-
-$transitions: (
-  'fast': 150ms ease,
-  'base': 250ms ease,
-  'slow': 400ms ease,
-);
-
-@mixin min($breakpoint) {
-  @if map-has-key($breakpoints, $breakpoint) {
-    @media (min-width: map-get($breakpoints, $breakpoint)) {
-      @content;
-    }
-  }
-}
-
-@function color($key) {
-  @return map-get($colors, $key);
-}
-
-@function spacing($key) {
-  @return map-get($spacing, $key);
-}
-
-@function transition($key) {
-  @return map-get($transitions, $key);
-}
+  const _styles = `// Sass requires every @use before any other rule, so partials load here.
+// 'utils' and 'sections/*' resolve through the loadPaths in vite.config.js.
+@use 'utils' as u;
+@use 'sections/${config.namespace}-example';
 
 :root {
-  --spacing-xs: #{spacing('xs')};
-  --spacing-sm: #{spacing('sm')};
-  --spacing-md: #{spacing('md')};
-  --spacing-lg: #{spacing('lg')};
-  --spacing-xl: #{spacing('xl')};
-  --transition-fast: #{transition('fast')};
-  --transition-base: #{transition('base')};
-  --border-radius: 4px;
+  --spacing-xs: #{u.spacing('xs')};
+  --spacing-sm: #{u.spacing('sm')};
+  --spacing-md: #{u.spacing('md')};
+  --spacing-lg: #{u.spacing('lg')};
+  --spacing-xl: #{u.spacing('xl')};
+  --spacing-xxl: #{u.spacing('xxl')};
+  --transition-fast: #{u.transition('fast')};
+  --transition-base: #{u.transition('base')};
+  --transition-slow: #{u.transition('slow')};
+  --border-radius: #{u.radius('sm')};
+  --border-radius-md: #{u.radius('md')};
+  --border-radius-lg: #{u.radius('lg')};
+  --border-radius-pill: #{u.radius('pill')};
 }
 
 .visually-hidden {
@@ -1453,39 +1649,44 @@ defineElement('${_tag}', ${_class});
   await writeFile(`sections/${_tag}.liquid`, _liquid);
   log(`Created: sections/${_tag}.liquid`, colors.green);
 
-  const _scss = `.${_block} {
+  const _scss = `@use 'utils' as u;
+
+${_tag} {
   display: block;
-  padding: var(--spacing-lg) var(--spacing-md);
+  padding: u.spacing('lg') u.spacing('md');
 }
 
 .${_block}__heading {
-  margin: 0 0 var(--spacing-sm);
+  margin: 0 0 u.spacing('sm');
+  font-size: u.fluid(24, 40);
+  line-height: 1.2;
 }
 
 .${_block}__body {
   display: grid;
-  gap: var(--spacing-sm);
+  gap: u.spacing('sm');
 }
 
 .${_block}__action {
   justify-self: start;
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: u.rem(8) u.rem(16);
   border-radius: var(--border-radius);
+  font-size: u.rem(14);
   cursor: pointer;
   transition: opacity var(--transition-base);
 }
 
-.${_block}.is-active .${_block}__action {
+${_tag}.is-active .${_block}__action {
   opacity: 0.6;
 }
 
-@media (min-width: 768px) {
-  .${_block} {
-    padding: var(--spacing-xl) var(--spacing-lg);
+@include u.min('md') {
+  ${_tag} {
+    padding: u.spacing('xl') u.spacing('lg');
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@include u.reduced-motion {
   .${_block}__action {
     transition: none;
   }
@@ -1575,6 +1776,7 @@ the tag in the Liquid markup is what boots the behaviour. There is no registry.
 | Utilities | \`frontend/scripts/utils/\` |
 | Constants | \`frontend/scripts/constants/\` |
 | Shared types | \`frontend/scripts/types/\` |
+| SCSS helpers and tokens | \`frontend/styles/utils/\` |
 | Section styles | \`frontend/styles/sections/\` |
 | Component styles | \`frontend/styles/components/\` |
 
@@ -1904,22 +2106,65 @@ disconnectedCallback(): void {
 
 ## Styling (SCSS)
 
-Mobile first, BEM, state classes:
+Every partial opens with the helpers. \`utils\` resolves through the \`loadPaths\`
+entry in \`vite.config.js\`, so the path never changes with nesting:
 
 \`\`\`scss
-.${_tag} {
+@use 'utils' as u;
+\`\`\`
+
+| Helper | Use |
+|--------|-----|
+| \`u.rem(16)\` | px to rem. Takes a list too: \`u.rem(16 24)\` -> \`1rem 1.5rem\`. |
+| \`u.rem-calc(16)\` | Alias of \`u.rem()\`, for parity with our other themes. |
+| \`u.fluid(24, 40)\` | Scales linearly between the 390px and 1728px viewports, clamped at both ends. A \`(min, mid, max)\` list also works; the middle value is ignored. |
+| \`u.spacing('lg')\` | Spacing token. \`xs\`–\`md\` are fixed rem, \`lg\`–\`xxl\` are fluid. |
+| \`u.transition('base')\`, \`u.radius('md')\`, \`u.color('text')\` | The other token scales. |
+| \`@include u.min('md')\` | Mobile-first breakpoint. Also \`u.max()\`, \`u.between()\`. |
+| \`@include u.reduced-motion\` | \`prefers-reduced-motion: reduce\` block. |
+
+\`u.fluid(24, 40)\` compiles to \`clamp(1.5rem, 1.20852rem + 1.19581vw, 2.5rem)\` —
+24px on a 390px phone, 40px at 1728px, linear between, and it stops growing
+outside that range. That is the whole point: one declaration instead of a value
+plus two breakpoint overrides.
+
+\`\`\`scss
+@use 'utils' as u;
+
+${_tag} {
   display: block;
-  padding: var(--spacing-md);
-
-  @include min('md') {
-    padding: var(--spacing-lg);
-  }
-
-  &__track { }
-  &__slide { }
-  &--boxed { }
-  &.is-loading { }
+  padding: u.spacing('lg') u.spacing('md');
 }
+
+.${_tag}__heading {
+  font-size: u.fluid(24, 40);
+  margin-bottom: u.rem(8);
+}
+
+@include u.min('md') {
+  ${_tag} {
+    padding: u.spacing('xl') u.spacing('lg');
+  }
+}
+\`\`\`
+
+Rules:
+
+- **MUST NOT** write raw \`px\`. \`u.rem()\` for fixed sizes, \`u.fluid()\` for anything
+  that should scale — type, section padding, large gaps. Hairline borders aside.
+- **MUST** reach values through the token functions. A value two sections share
+  belongs in \`frontend/styles/utils/_tokens.scss\`.
+- **MUST** stay mobile-first: base styles are the phone, \`@include u.min()\` adds.
+- The \`:root\` block in the entrypoint mirrors the tokens as custom properties, so
+  Liquid and one-off styles can use \`var(--spacing-lg)\`.
+
+BEM and state classes as usual:
+
+\`\`\`scss
+.${_tag}__track { }
+.${_tag}__slide { }
+.${_tag}--boxed { }
+${_tag}.is-loading { }
 \`\`\`
 
 ---
@@ -1934,6 +2179,7 @@ Mobile first, BEM, state classes:
 - [ ] Guard clauses for early returns; function-scoped vars \`_prefixed\`
 - [ ] Logging via \`consoleMessage()\`
 - [ ] Root has an explicit \`display\`; styles are mobile-first
+- [ ] Sizes go through \`u.rem()\` / \`u.fluid()\`, not raw \`px\`
 - [ ] Tested in the theme editor, including block select
 `;
 
@@ -1973,13 +2219,16 @@ You are a UI/UX design specialist for Shopify theme development.
 ## SCSS Patterns
 
 \`\`\`scss
-.component {
-  padding: spacing('md');
-  color: color('text');
-  transition: transition('base');
+@use 'utils' as u;
 
-  @include min('md') {
-    padding: spacing('lg');
+.component {
+  padding: u.spacing('md');
+  color: u.color('text');
+  font-size: u.fluid(16, 20);
+  transition: opacity u.transition('base');
+
+  @include u.min('md') {
+    padding: u.spacing('lg');
   }
 }
 \`\`\`
@@ -2404,6 +2653,8 @@ async function main(): Promise<void> {
     await createGitIgnore(_config);
     await createShopifyIgnore();
     await createGitHubWorkflow(_config);
+    await createEslintConfig();
+    await createStyleHelpers();
     await createEntrypoints(_config);
     await createUtilities(_config);
     await createConstants();

@@ -485,7 +485,7 @@ them all at once and cannot drift out of sync with the bind sites.
 | `sections/<prefix>-carousel.liquid` | Markup, with the tag as the root element |
 | `frontend/scripts/components/sections/<prefix>-carousel.ts` | Behaviour + `defineElement()` |
 | `frontend/scripts/components/sections/<prefix>-carousel.types.ts` | Config type |
-| `frontend/styles/sections/_<prefix>-carousel.scss` | Styles |
+| `frontend/styles/sections/_<prefix>-carousel.scss` | Styles, opening with `@use 'utils' as u;` |
 
 Registration is one line in `frontend/scripts/components/sections/index.ts`:
 
@@ -496,6 +496,71 @@ import './<prefix>-carousel';
 That barrel is imported by the entrypoint, and forgetting it is the only way a
 section fails to mount. The namespace prefix gives the tag its required hyphen
 for free.
+
+### Sizing: rem and fluid helpers
+
+`frontend/styles/utils/` holds the helpers every partial opens with. They resolve
+through a `loadPaths` entry in `vite.config.js`, so the import never changes with
+nesting:
+
+```scss
+@use 'utils' as u;
+```
+
+| Helper | Use |
+|--------|-----|
+| `u.rem(16)` | px to rem. Lists work: `u.rem(16 24)` -> `1rem 1.5rem`. |
+| `u.rem-calc(16)` | Alias of `u.rem()`, so call sites from older themes paste over unchanged. |
+| `u.fluid(24, 40)` | Scales linearly between the 390px and 1728px viewports, clamped at both ends. |
+| `u.spacing('lg')` | Spacing token. `xs`–`md` fixed, `lg`–`xxl` fluid. |
+| `u.transition('base')`, `u.radius('md')`, `u.color('text')` | The other token scales. |
+| `@include u.min('md')` | Mobile-first breakpoint. Also `u.max()`, `u.between()`. |
+| `@include u.reduced-motion` | The `prefers-reduced-motion: reduce` block. |
+
+**How `fluid()` works.** It solves the line through two points — the min size at a
+390px viewport and the max at 1728px — and emits the result as a `clamp()`:
+
+```scss
+padding: u.fluid(24, 40);
+// clamp(1.5rem, 1.20852rem + 1.19581vw, 2.5rem)
+```
+
+The `vw` term is the slope, the `rem` term the intercept, and `clamp()` stops
+growth outside the range. At 390px that evaluates to 24px, at 1728px to 40px,
+and it interpolates between — one declaration instead of a base value plus two
+breakpoint overrides.
+
+The three-value form from harmony, `u.fluid((16, 24, 32))`, still compiles: the
+middle value never affected the curve there either, so it is read as min and max.
+
+**How to use it.** Type and any spacing large enough to set the page rhythm go
+through `fluid()`. Small fixed gaps, borders and radii go through `rem()`. Raw
+`px` is a review failure, hairline borders aside.
+
+```scss
+@use 'utils' as u;
+
+<prefix>-carousel {
+  display: block;
+  padding: u.spacing('lg') u.spacing('md');
+}
+
+.<prefix>-carousel__heading {
+  font-size: u.fluid(24, 40);
+  margin-bottom: u.rem(8);
+}
+
+@include u.min('md') {
+  <prefix>-carousel {
+    padding: u.spacing('xl') u.spacing('lg');
+  }
+}
+```
+
+A value two sections share is a token, not a literal — add it to
+`frontend/styles/utils/_tokens.scss`. The entrypoint mirrors every token scale
+into `:root` as custom properties, so Liquid and one-off styles can reach them as
+`var(--spacing-lg)` without importing anything.
 
 ### Import order in the entrypoint is load-bearing
 
