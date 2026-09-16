@@ -449,9 +449,6 @@ async function loadConfigFile(path: string): Promise<SetupConfig> {
     environmentName: 'development',
     themeId: null,
     ..._parsed,
-    stylingApproach: 'scss',
-    jsApproach: 'typescript',
-    packageManager: 'yarn',
   } as SetupConfig;
 }
 
@@ -561,14 +558,12 @@ async function askQuestions(): Promise<SetupConfig> {
 async function createDirectoryStructure(config: SetupConfig): Promise<void> {
   header('Creating Directory Structure');
 
-  const _ext = config.jsApproach === 'typescript' ? 'ts' : 'js';
-
   const _dirs = [
     '.claude/agents',
     'frontend/entrypoints',
-    `frontend/scripts/components/sections`,
-    `frontend/scripts/components/shared`,
-    'frontend/scripts/hooks/core',
+    'frontend/scripts/components/sections',
+    'frontend/scripts/components/shared',
+    'frontend/scripts/core',
     'frontend/scripts/types',
     'frontend/scripts/constants',
     'frontend/scripts/utils',
@@ -660,9 +655,7 @@ async function installDependencies(): Promise<void> {
 async function createViteConfig(config: SetupConfig): Promise<void> {
   header('Creating Vite Configuration');
 
-  const _scssPreprocessor =
-    config.stylingApproach === 'scss'
-      ? `
+  const _scssPreprocessor = `
     preprocessorOptions: {
       scss: {
         additionalData: '@use "sass:math"; @use "sass:map";',
@@ -672,8 +665,7 @@ async function createViteConfig(config: SetupConfig): Promise<void> {
           warn: () => { }
         }
       }
-    }`
-      : '';
+    }`;
 
   const _viteConfig = `import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
@@ -765,19 +757,11 @@ export default defineConfig(() => ({
   log('Created: vite.config.js', colors.green);
 }
 
-async function createPostCSSConfig(config: SetupConfig): Promise<void> {
-  const _plugins =
-    config.stylingApproach === 'tailwind'
-      ? `{
-    tailwindcss: {},
-    autoprefixer: {},
-  }`
-      : `{
-    autoprefixer: {},
-  }`;
-
+async function createPostCSSConfig(): Promise<void> {
   const _postcssConfig = `export default {
-  plugins: ${_plugins},
+  plugins: {
+    autoprefixer: {},
+  },
 }
 `;
 
@@ -785,44 +769,7 @@ async function createPostCSSConfig(config: SetupConfig): Promise<void> {
   log('Created: postcss.config.js', colors.green);
 }
 
-async function createTailwindConfig(config: SetupConfig): Promise<void> {
-  if (config.stylingApproach !== 'tailwind') return;
-
-  header('Creating Tailwind Configuration');
-
-  const _tailwindConfig = `/** @type {import('tailwindcss').Config} */
-export default {
-  content: [
-    './layout/**/*.liquid',
-    './sections/**/*.liquid',
-    './snippets/**/*.liquid',
-    './templates/**/*.liquid',
-    './frontend/**/*.{js,ts,css,scss}',
-  ],
-  theme: {
-    extend: {
-      // Add your custom theme extensions here
-      colors: {
-        // Use CSS variables from Shopify theme settings
-        primary: 'rgb(var(--color-button) / <alpha-value>)',
-        secondary: 'rgb(var(--color-accent) / <alpha-value>)',
-      },
-    },
-  },
-  plugins: [],
-}
-`;
-
-  await writeFile('tailwind.config.js', _tailwindConfig);
-  log('Created: tailwind.config.js', colors.green);
-
-  log('\nTailwind is configured to use @apply in CSS files.', colors.yellow);
-  log('DO NOT use inline utility classes in Liquid templates.\n', colors.yellow);
-}
-
-async function createTypeScriptConfig(config: SetupConfig): Promise<void> {
-  if (config.jsApproach !== 'typescript') return;
-
+async function createTypeScriptConfig(): Promise<void> {
   header('Creating TypeScript Configuration');
 
   const _tsConfig = {
@@ -999,7 +946,7 @@ jobs:
       - run: yarn lint
       - run: yarn build
 
-\${_assetStep}
+${_assetStep}
 `;
 
   await writeFile('.github/workflows/build.yml', _workflow);
@@ -1010,29 +957,61 @@ jobs:
 // FRONTEND FILES
 // =============================================================================
 
+function toPascalCase(value: string): string {
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((_part) => _part[0].toUpperCase() + _part.slice(1))
+    .join('');
+}
+
 async function createEntrypoints(config: SetupConfig): Promise<void> {
   header('Creating Entry Points');
 
-  const _ext = config.jsApproach === 'typescript' ? 'ts' : 'js';
-  const _styleExt = config.stylingApproach === 'scss' ? 'scss' : 'css';
+  const _g = config.projectNameSafe;
 
-  // storefront.ts/js
-  const _storefront = `/**
- * Storefront Entry Point
- * Initializes Custom Elements and Section Registry
- */
+  const _types = `export type LiquidRoutes = Record<
+  'cart' | 'cartAdd' | 'cartChange' | 'cartUpdate' | 'predictiveSearch',
+  string
+>;
 
-import 'vite/modulepreload-polyfill';
-import { registerAllSections } from '@/hooks/core/sectionRegistry';
-import { consoleMessage } from '@/utils';
+export type LiquidBootstrap = {
+  readonly devMode: boolean;
+  readonly routes: LiquidRoutes;
+  readonly cart: { count: number; total: number };
+};
 
-// =============================================================================
-// GLOBAL STORE OBJECT
-// =============================================================================
+export type StorefrontGlobal = {
+  settings: {
+    devMode: boolean;
+    debugEvents: boolean;
+  };
+  theme: {
+    shopName: string;
+    currency: string;
+    moneyFormat: string;
+  };
+  routes: LiquidRoutes;
+  cart: {
+    count: number;
+    total: number;
+  };
+  events: EventTarget;
+  version: string;
+};
 
-${config.jsApproach === 'typescript' ? `declare global {
+export type ShopifySectionEvent = CustomEvent<{ sectionId: string; load: boolean }>;
+
+export type ShopifyBlockEvent = CustomEvent<{
+  blockId: string;
+  sectionId: string;
+  load: boolean;
+}>;
+
+declare global {
   interface Window {
-    ${config.projectNameSafe}: StorefrontGlobal;
+    ${_g}: StorefrontGlobal;
+    ${_g}Settings?: LiquidBootstrap;
     Shopify?: {
       shop?: string;
       currency?: { active: string };
@@ -1043,28 +1022,21 @@ ${config.jsApproach === 'typescript' ? `declare global {
     };
   }
 }
+`;
 
-interface StorefrontGlobal {
+  await writeFile('frontend/scripts/types/index.ts', _types);
+  log('Created: frontend/scripts/types/index.ts', colors.green);
+
+  const _global = `import type { StorefrontGlobal } from '@/types';
+
+const _bootstrap = window.${_g}Settings;
+
+// Must run before any section module is imported: elements upgrade the moment
+// they are defined, and consoleMessage() reads window.${_g} during that first
+// upgrade.
+window.${_g} = {
   settings: {
-    devMode: boolean;
-    debugEvents: boolean;
-  };
-  theme: {
-    shopName: string;
-    currency: string;
-    moneyFormat: string;
-  };
-  cart: {
-    count: number;
-    total: number;
-  };
-  events: EventTarget;
-  version: string;
-}
-` : ''}
-window.${config.projectNameSafe} = {
-  settings: {
-    devMode: import.meta.env.DEV,
+    devMode: _bootstrap?.devMode ?? import.meta.env.DEV,
     debugEvents: false,
   },
   theme: {
@@ -1072,54 +1044,36 @@ window.${config.projectNameSafe} = {
     currency: window.Shopify?.currency?.active || 'USD',
     moneyFormat: window.theme?.moneyFormat || '\${{amount}}',
   },
+  routes: _bootstrap?.routes ?? {
+    cart: '/cart',
+    cartAdd: '/cart/add',
+    cartChange: '/cart/change',
+    cartUpdate: '/cart/update',
+    predictiveSearch: '/search/suggest',
+  },
   cart: {
-    count: 0,
-    total: 0,
+    count: _bootstrap?.cart.count ?? 0,
+    total: _bootstrap?.cart.total ?? 0,
   },
   events: new EventTarget(),
   version: '1.0.0',
-};
-
-// =============================================================================
-// INITIALIZATION
-// =============================================================================
-
-function initializeApp()${config.jsApproach === 'typescript' ? ': void' : ''} {
-  consoleMessage('[Init] Starting application', 'info');
-
-  // Register all section Custom Elements
-  registerAllSections();
-
-  consoleMessage('[Init] Application ready', 'info', {
-    version: window.${config.projectNameSafe}.version,
-    devMode: window.${config.projectNameSafe}.settings.devMode,
-  });
-}
-
-// Initialize on DOM ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeApp);
-} else {
-  initializeApp();
-}
-
-export default window.${config.projectNameSafe};
+} satisfies StorefrontGlobal;
 `;
 
-  await writeFile(`frontend/entrypoints/storefront.${_ext}`, _storefront);
-  log(`Created: frontend/entrypoints/storefront.${_ext}`, colors.green);
+  await writeFile('frontend/scripts/core/global.ts', _global);
+  log('Created: frontend/scripts/core/global.ts', colors.green);
 
-  // custom_styling.scss/css
-  let _styles = '';
+  const _storefront = `import 'vite/modulepreload-polyfill';
+import '@/core/global';
+import '@/components/sections';
+`;
 
-  if (config.stylingApproach === 'scss') {
-    _styles = `/**
- * Custom Styling Entry Point (SCSS)
- */
+  await writeFile('frontend/entrypoints/storefront.ts', _storefront);
+  log('Created: frontend/entrypoints/storefront.ts', colors.green);
 
-// =============================================================================
-// DESIGN TOKENS
-// =============================================================================
+  const _styles = `// Sass requires every @use before any other rule, so partials load here rather
+// than at the end of the file.
+@use '../styles/sections/${config.namespace}-example';
 
 $colors: (
   'primary': rgb(var(--color-button)),
@@ -1151,10 +1105,6 @@ $transitions: (
   'slow': 400ms ease,
 );
 
-// =============================================================================
-// MIXINS
-// =============================================================================
-
 @mixin min($breakpoint) {
   @if map-has-key($breakpoints, $breakpoint) {
     @media (min-width: map-get($breakpoints, $breakpoint)) {
@@ -1175,10 +1125,6 @@ $transitions: (
   @return map-get($transitions, $key);
 }
 
-// =============================================================================
-// CSS CUSTOM PROPERTIES
-// =============================================================================
-
 :root {
   --spacing-xs: #{spacing('xs')};
   --spacing-sm: #{spacing('sm')};
@@ -1190,10 +1136,6 @@ $transitions: (
   --border-radius: 4px;
 }
 
-// =============================================================================
-// UTILITIES
-// =============================================================================
-
 .visually-hidden {
   position: absolute !important;
   width: 1px;
@@ -1205,163 +1147,28 @@ $transitions: (
   white-space: nowrap;
   border: 0;
 }
-
-// =============================================================================
-// COMPONENT IMPORTS
-// =============================================================================
-
-// @use '../styles/sections/featured-collection';
-// @use '../styles/components/product-card';
 `;
-  } else if (config.stylingApproach === 'tailwind') {
-    _styles = `/**
- * Custom Styling Entry Point (Tailwind)
- *
- * IMPORTANT: Use @apply in this file, NOT inline utilities in Liquid.
- */
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-// =============================================================================
-// CSS CUSTOM PROPERTIES (for Shopify theme settings)
-// =============================================================================
-
-:root {
-  --spacing-xs: 0.25rem;
-  --spacing-sm: 0.5rem;
-  --spacing-md: 1rem;
-  --spacing-lg: 2rem;
-  --spacing-xl: 4rem;
-  --transition-fast: 150ms ease;
-  --transition-base: 250ms ease;
-  --border-radius: 4px;
-}
-
-// =============================================================================
-// COMPONENT STYLES (using @apply)
-// =============================================================================
-
-.visually-hidden {
-  @apply absolute w-px h-px p-0 -m-px overflow-hidden whitespace-nowrap border-0;
-  clip: rect(0, 0, 0, 0);
-}
-
-// Example component using @apply:
-// .product-card {
-//   @apply flex flex-col gap-4;
-//   @apply bg-white rounded-lg shadow-sm;
-//   @apply transition-shadow duration-200;
-//
-//   &:hover {
-//     @apply shadow-md;
-//   }
-//
-//   &__title {
-//     @apply text-lg font-semibold text-gray-900;
-//   }
-//
-//   &__price {
-//     @apply text-base text-gray-600;
-//   }
-// }
-
-// =============================================================================
-// COMPONENT IMPORTS
-// =============================================================================
-
-// @import '../styles/sections/featured-collection';
-// @import '../styles/components/product-card';
-`;
-  } else {
-    _styles = `/**
- * Custom Styling Entry Point (CSS)
- */
-
-/* =============================================================================
-   DESIGN TOKENS
-   ============================================================================= */
-
-:root {
-  /* Colors */
-  --color-primary: rgb(var(--color-button));
-  --color-secondary: rgb(var(--color-accent));
-  --color-text: #1a1a1a;
-  --color-text-muted: #666;
-  --color-surface: #ffffff;
-  --color-border: #e5e5e5;
-
-  /* Spacing */
-  --spacing-xs: 0.25rem;
-  --spacing-sm: 0.5rem;
-  --spacing-md: 1rem;
-  --spacing-lg: 2rem;
-  --spacing-xl: 4rem;
-
-  /* Transitions */
-  --transition-fast: 150ms ease;
-  --transition-base: 250ms ease;
-  --transition-slow: 400ms ease;
-
-  /* Borders */
-  --border-radius: 4px;
-}
-
-/* =============================================================================
-   UTILITIES
-   ============================================================================= */
-
-.visually-hidden {
-  position: absolute !important;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-/* =============================================================================
-   COMPONENT IMPORTS
-   ============================================================================= */
-
-/* @import '../styles/sections/featured-collection.css'; */
-/* @import '../styles/components/product-card.css'; */
-`;
-  }
-
-  await writeFile(`frontend/entrypoints/custom_styling.${_styleExt}`, _styles);
-  log(`Created: frontend/entrypoints/custom_styling.${_styleExt}`, colors.green);
+  await writeFile('frontend/entrypoints/custom_styling.scss', _styles);
+  log('Created: frontend/entrypoints/custom_styling.scss', colors.green);
 }
 
 async function createUtilities(config: SetupConfig): Promise<void> {
   header('Creating Utilities');
 
-  const _ext = config.jsApproach === 'typescript' ? 'ts' : 'js';
-  const _typeAnnotations = config.jsApproach === 'typescript';
+  const _g = config.projectNameSafe;
 
-  // utils/index.ts
-  const _utils = `/**
- * Utility Functions
- */
+  const _utils = `type LogLevel = 'log' | 'info' | 'warn' | 'error';
 
-type LogLevel = 'log' | 'info' | 'warn' | 'error';
-
-/**
- * Console message that respects devMode setting
- */
 export function consoleMessage(
-  message${_typeAnnotations ? ': string' : ''},
-  level${_typeAnnotations ? ': LogLevel' : ''} = 'log',
-  data${_typeAnnotations ? ': unknown' : ''} = null
-)${_typeAnnotations ? ': void' : ''} {
-  if (!window.${config.projectNameSafe}?.settings?.devMode) return;
+  message: string,
+  level: LogLevel = 'log',
+  data: unknown = null
+): void {
+  if (!window.${_g}?.settings?.devMode) return;
 
   const _prefix = '[${config.projectName}]';
-  const _styles${_typeAnnotations ? ': Record<LogLevel, string>' : ''} = {
+  const _styles: Record<LogLevel, string> = {
     log: 'color: #6b7280',
     info: 'color: #3b82f6',
     warn: 'color: #f59e0b',
@@ -1375,31 +1182,73 @@ export function consoleMessage(
   }
 }
 
-/**
- * Debounce function for rate-limiting
- */
-export function debounce${_typeAnnotations ? '<T extends (...args: unknown[]) => void>' : ''}(
-  fn${_typeAnnotations ? ': T' : ''},
-  wait${_typeAnnotations ? ': number' : ''}
-)${_typeAnnotations ? ': (...args: Parameters<T>) => void' : ''} {
-  let _timeout${_typeAnnotations ? ': ReturnType<typeof setTimeout> | null' : ''} = null;
+/** The theme editor re-evaluates the bundle, and a second define() throws. */
+export function defineElement(tagName: string, elementClass: CustomElementConstructor): void {
+  if (customElements.get(tagName)) return;
 
-  return function executedFunction(...args${_typeAnnotations ? ': Parameters<T>' : ''}) {
+  customElements.define(tagName, elementClass);
+}
+
+export function parseElementConfig<T extends object>(element: HTMLElement, fallback: T): T {
+  const _raw = element.dataset.config;
+  if (!_raw) return fallback;
+
+  try {
+    return { ...fallback, ...(JSON.parse(_raw) as Partial<T>) };
+  } catch {
+    consoleMessage(\`<\${element.localName}>: invalid data-config JSON\`, 'warn');
+    return fallback;
+  }
+}
+
+/**
+ * Defers work until the element nears the viewport. Returns a teardown to call
+ * from disconnectedCallback — the observer outlives the element otherwise.
+ */
+export function whenVisible(
+  element: Element,
+  callback: () => void,
+  rootMargin = '200px'
+): () => void {
+  if (!('IntersectionObserver' in window)) {
+    callback();
+    return () => {};
+  }
+
+  const _observer = new IntersectionObserver(
+    (entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+
+      _observer.disconnect();
+      callback();
+    },
+    { rootMargin }
+  );
+
+  _observer.observe(element);
+
+  return () => _observer.disconnect();
+}
+
+export function debounce<T extends (...args: unknown[]) => void>(
+  fn: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let _timeout: ReturnType<typeof setTimeout> | null = null;
+
+  return function executedFunction(...args: Parameters<T>) {
     if (_timeout) clearTimeout(_timeout);
     _timeout = setTimeout(() => fn(...args), wait);
   };
 }
 
-/**
- * Throttle function for rate-limiting
- */
-export function throttle${_typeAnnotations ? '<T extends (...args: unknown[]) => void>' : ''}(
-  fn${_typeAnnotations ? ': T' : ''},
-  wait${_typeAnnotations ? ': number' : ''}
-)${_typeAnnotations ? ': (...args: Parameters<T>) => void' : ''} {
+export function throttle<T extends (...args: unknown[]) => void>(
+  fn: T,
+  wait: number
+): (...args: Parameters<T>) => void {
   let _lastTime = 0;
 
-  return function executedFunction(...args${_typeAnnotations ? ': Parameters<T>' : ''}) {
+  return function executedFunction(...args: Parameters<T>) {
     const _now = Date.now();
     if (_now - _lastTime >= wait) {
       _lastTime = _now;
@@ -1408,56 +1257,38 @@ export function throttle${_typeAnnotations ? '<T extends (...args: unknown[]) =>
   };
 }
 
-/**
- * Dispatch custom event on window.${config.projectNameSafe}.events
- */
-export function dispatchStoreEvent(
-  name${_typeAnnotations ? ': string' : ''},
-  detail${_typeAnnotations ? ': unknown' : ''} = {}
-)${_typeAnnotations ? ': void' : ''} {
-  const _event = new CustomEvent(name, { detail });
-  window.${config.projectNameSafe}.events.dispatchEvent(_event);
+export function dispatchStoreEvent(name: string, detail: unknown = {}): void {
+  window.${_g}.events.dispatchEvent(new CustomEvent(name, { detail }));
 
-  if (window.${config.projectNameSafe}.settings.debugEvents) {
+  if (window.${_g}.settings.debugEvents) {
     consoleMessage(\`Event: \${name}\`, 'info', detail);
   }
 }
 
-/**
- * Subscribe to custom event on window.${config.projectNameSafe}.events
- */
 export function subscribeToStoreEvent(
-  name${_typeAnnotations ? ': string' : ''},
-  callback${_typeAnnotations ? ': (event: CustomEvent) => void' : ''}
-)${_typeAnnotations ? ': () => void' : ''} {
-  const _handler = (event${_typeAnnotations ? ': Event' : ''}) => callback(event${_typeAnnotations ? ' as CustomEvent' : ''});
-  window.${config.projectNameSafe}.events.addEventListener(name, _handler);
+  name: string,
+  callback: (event: CustomEvent) => void
+): () => void {
+  const _handler = (event: Event) => callback(event as CustomEvent);
+  window.${_g}.events.addEventListener(name, _handler);
 
-  // Return unsubscribe function
-  return () => window.${config.projectNameSafe}.events.removeEventListener(name, _handler);
+  return () => window.${_g}.events.removeEventListener(name, _handler);
 }
 `;
 
-  await writeFile(`frontend/scripts/utils/index.${_ext}`, _utils);
-  log(`Created: frontend/scripts/utils/index.${_ext}`, colors.green);
+  await writeFile('frontend/scripts/utils/index.ts', _utils);
+  log('Created: frontend/scripts/utils/index.ts', colors.green);
 }
 
-async function createConstants(config: SetupConfig): Promise<void> {
-  const _ext = config.jsApproach === 'typescript' ? 'ts' : 'js';
-  const _typeAnnotations = config.jsApproach === 'typescript';
-
-  const _constants = `/**
- * Global Constants
- */
-
-export const BREAKPOINTS${_typeAnnotations ? ': Readonly<Record<string, number>>' : ''} = {
+async function createConstants(): Promise<void> {
+  const _constants = `export const BREAKPOINTS = {
   SM: 640,
   MD: 768,
   LG: 1024,
   XL: 1280,
-}${_typeAnnotations ? ' as const' : ''};
+} as const;
 
-export const ANIMATION${_typeAnnotations ? ': Readonly<{ DURATION: Record<string, number>; EASING: Record<string, string> }>' : ''} = {
+export const ANIMATION = {
   DURATION: {
     FAST: 150,
     BASE: 250,
@@ -1468,14 +1299,9 @@ export const ANIMATION${_typeAnnotations ? ': Readonly<{ DURATION: Record<string
     SPRING: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
     SMOOTH: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
-}${_typeAnnotations ? ' as const' : ''};
+} as const;
 
-export const SELECTORS${_typeAnnotations ? ': Readonly<Record<string, string>>' : ''} = {
-  SECTION: '[data-section-id]',
-  SECTION_TYPE: '[data-section-type]',
-}${_typeAnnotations ? ' as const' : ''};
-
-export const EVENTS${_typeAnnotations ? ': Readonly<Record<string, string>>' : ''} = {
+export const EVENTS = {
   CART_UPDATED: 'cart:updated',
   CART_ADD: 'cart:add',
   VARIANT_CHANGE: 'variant:change',
@@ -1483,336 +1309,191 @@ export const EVENTS${_typeAnnotations ? ': Readonly<Record<string, string>>' : '
   MODAL_CLOSE: 'modal:close',
   DRAWER_OPEN: 'drawer:open',
   DRAWER_CLOSE: 'drawer:close',
-}${_typeAnnotations ? ' as const' : ''};
+} as const;
 `;
 
-  await writeFile(`frontend/scripts/constants/index.${_ext}`, _constants);
-  log(`Created: frontend/scripts/constants/index.${_ext}`, colors.green);
+  await writeFile('frontend/scripts/constants/index.ts', _constants);
+  log('Created: frontend/scripts/constants/index.ts', colors.green);
 }
 
-async function createSectionRegistry(config: SetupConfig): Promise<void> {
-  header('Creating Section Registry');
+async function createSectionBarrel(config: SetupConfig): Promise<void> {
+  header('Creating Section Barrel');
 
-  const _ext = config.jsApproach === 'typescript' ? 'ts' : 'js';
-  const _typeAnnotations = config.jsApproach === 'typescript';
-
-  const _sectionRegistry = `/**
- * Section Registry
- *
- * Manages Custom Element registration and Shopify Theme Editor lifecycle.
- * Each section component is a Custom Element that extends HTMLElement.
- */
-
-import { consoleMessage } from '@/utils';
-
-${_typeAnnotations ? `
-// =============================================================================
-// TYPES
-// =============================================================================
-
-export interface SectionCallbacks {
-  /** Called when section loads (page load or Theme Editor) */
-  onLoad?: (container: HTMLElement) => void;
-  /** Called when section unloads (Theme Editor only) */
-  onUnload?: (container: HTMLElement) => void;
-  /** Called when a block is selected in Theme Editor */
-  onBlockSelect?: (event: CustomEvent) => void;
-  /** Called when a block is deselected in Theme Editor */
-  onBlockDeselect?: (event: CustomEvent) => void;
-  /** Called when section is selected in Theme Editor */
-  onSelect?: (event: CustomEvent) => void;
-  /** Called when section is deselected in Theme Editor */
-  onDeselect?: (event: CustomEvent) => void;
-}
-
-interface RegisteredSection {
-  elementName: string;
-  callbacks: SectionCallbacks;
-}
-` : ''}
-// =============================================================================
-// REGISTRY
-// =============================================================================
-
-const _registeredSections${_typeAnnotations ? ': Map<string, RegisteredSection>' : ''} = new Map();
-
-/**
- * Register a Custom Element as a section component
- *
- * @param sectionType - The section type (matches data-section-type in Liquid)
- * @param elementName - The custom element tag name (e.g., 'featured-collection')
- * @param elementClass - The Custom Element class
- * @param callbacks - Optional Theme Editor lifecycle callbacks
- */
-export function registerSection${_typeAnnotations ? '<T extends typeof HTMLElement>' : ''}(
-  sectionType${_typeAnnotations ? ': string' : ''},
-  elementName${_typeAnnotations ? ': string' : ''},
-  elementClass${_typeAnnotations ? ': T' : ''},
-  callbacks${_typeAnnotations ? ': SectionCallbacks' : ''} = {}
-)${_typeAnnotations ? ': void' : ''} {
-  // Register Custom Element (check first to avoid errors)
-  if (!customElements.get(elementName)) {
-    customElements.define(elementName, elementClass);
-    consoleMessage(\`Registered: <\${elementName}>\`, 'info');
-  }
-
-  // Store for Theme Editor lifecycle
-  _registeredSections.set(sectionType, { elementName, callbacks });
-}
-
-/**
- * Register all section components
- * Import and register your sections here
- */
-export function registerAllSections()${_typeAnnotations ? ': void' : ''} {
-  // Example:
-  // import { FeaturedCollection } from '@/components/sections/featured-collection';
-  // registerSection('featured-collection', 'featured-collection', FeaturedCollection, {
-  //   onBlockSelect: (event) => { /* handle block select */ },
-  // });
-
-  consoleMessage('Section registration complete', 'info');
-}
-
-// =============================================================================
-// THEME EDITOR LIFECYCLE
-// =============================================================================
-
-/**
- * Initialize Theme Editor event listeners
- * Only active when Shopify.designMode is true
- */
-export function initThemeEditorListeners()${_typeAnnotations ? ': void' : ''} {
-  if (!window.Shopify?.designMode) return;
-
-  document.addEventListener('shopify:section:load', _handleSectionLoad);
-  document.addEventListener('shopify:section:unload', _handleSectionUnload);
-  document.addEventListener('shopify:section:select', _handleSectionSelect);
-  document.addEventListener('shopify:section:deselect', _handleSectionDeselect);
-  document.addEventListener('shopify:block:select', _handleBlockSelect);
-  document.addEventListener('shopify:block:deselect', _handleBlockDeselect);
-
-  consoleMessage('Theme Editor listeners initialized', 'info');
-}
-
-function _handleSectionLoad(event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} {
-  const _container = (event${_typeAnnotations ? ' as CustomEvent' : ''}).target${_typeAnnotations ? ' as HTMLElement' : ''};
-  const _sectionType = _container?.dataset?.sectionType;
-
-  if (!_sectionType) return;
-
-  const _section = _registeredSections.get(_sectionType);
-  _section?.callbacks.onLoad?.(_container);
-}
-
-function _handleSectionUnload(event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} {
-  const _container = (event${_typeAnnotations ? ' as CustomEvent' : ''}).target${_typeAnnotations ? ' as HTMLElement' : ''};
-  const _sectionType = _container?.dataset?.sectionType;
-
-  if (!_sectionType) return;
-
-  const _section = _registeredSections.get(_sectionType);
-  _section?.callbacks.onUnload?.(_container);
-}
-
-function _handleSectionSelect(event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} {
-  const _customEvent = event${_typeAnnotations ? ' as CustomEvent' : ''};
-  const _container = _customEvent.target${_typeAnnotations ? ' as HTMLElement' : ''};
-  const _sectionType = _container?.dataset?.sectionType;
-
-  if (!_sectionType) return;
-
-  const _section = _registeredSections.get(_sectionType);
-  _section?.callbacks.onSelect?.(_customEvent);
-}
-
-function _handleSectionDeselect(event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} {
-  const _customEvent = event${_typeAnnotations ? ' as CustomEvent' : ''};
-  const _container = _customEvent.target${_typeAnnotations ? ' as HTMLElement' : ''};
-  const _sectionType = _container?.dataset?.sectionType;
-
-  if (!_sectionType) return;
-
-  const _section = _registeredSections.get(_sectionType);
-  _section?.callbacks.onDeselect?.(_customEvent);
-}
-
-function _handleBlockSelect(event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} {
-  const _customEvent = event${_typeAnnotations ? ' as CustomEvent' : ''};
-  const _container = (_customEvent.target${_typeAnnotations ? ' as HTMLElement' : ''})?.closest('[data-section-type]')${_typeAnnotations ? ' as HTMLElement | null' : ''};
-  const _sectionType = _container?.dataset?.sectionType;
-
-  if (!_sectionType) return;
-
-  const _section = _registeredSections.get(_sectionType);
-  _section?.callbacks.onBlockSelect?.(_customEvent);
-}
-
-function _handleBlockDeselect(event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} {
-  const _customEvent = event${_typeAnnotations ? ' as CustomEvent' : ''};
-  const _container = (_customEvent.target${_typeAnnotations ? ' as HTMLElement' : ''})?.closest('[data-section-type]')${_typeAnnotations ? ' as HTMLElement | null' : ''};
-  const _sectionType = _container?.dataset?.sectionType;
-
-  if (!_sectionType) return;
-
-  const _section = _registeredSections.get(_sectionType);
-  _section?.callbacks.onBlockDeselect?.(_customEvent);
-}
-
-// Initialize Theme Editor listeners
-initThemeEditorListeners();
+  const _barrel = `// Each module calls defineElement() at eval time, so this import is what puts
+// the tag on the page.
+import './${config.namespace}-example';
 `;
 
-  await writeFile(`frontend/scripts/hooks/core/sectionRegistry.${_ext}`, _sectionRegistry);
-  log(`Created: frontend/scripts/hooks/core/sectionRegistry.${_ext}`, colors.green);
+  await writeFile('frontend/scripts/components/sections/index.ts', _barrel);
+  log('Created: frontend/scripts/components/sections/index.ts', colors.green);
 }
 
 async function createExampleSection(config: SetupConfig): Promise<void> {
-  header('Creating Example Section Component');
+  header('Creating Example Section');
 
-  const _ext = config.jsApproach === 'typescript' ? 'ts' : 'js';
-  const _typeAnnotations = config.jsApproach === 'typescript';
+  const _tag = `${config.namespace}-example`;
+  const _class = `${toPascalCase(config.namespace)}Example`;
+  const _block = _tag;
 
-  const _exampleSection = `/**
- * Example Section Component (Custom Element)
- *
- * Usage in Liquid:
- * <featured-collection
- *   data-section-id="{{ section.id }}"
- *   data-section-type="featured-collection"
- * >
- *   ...
- * </featured-collection>
- */
-
-import { consoleMessage } from '@/utils';
-
-${_typeAnnotations ? `
-interface FeaturedCollectionConfig {
-  autoplay: boolean;
-  speed: number;
-}
-` : ''}
-export class FeaturedCollection extends HTMLElement {
-  // Cache DOM references
-  _container${_typeAnnotations ? ': HTMLElement | null' : ''} = null;
-  _slides${_typeAnnotations ? ': NodeListOf<HTMLElement> | null' : ''} = null;
-
-  // State
-  _isInitialized = false;
-  _config${_typeAnnotations ? ': FeaturedCollectionConfig' : ''} = {
-    autoplay: false,
-    speed: 300,
-  };
-
-  // ==========================================================================
-  // LIFECYCLE
-  // ==========================================================================
-
-  /**
-   * Called when element is added to DOM
-   */
-  connectedCallback()${_typeAnnotations ? ': void' : ''} {
-    // Guard: prevent double initialization
-    if (this._isInitialized) return;
-
-    this._init();
-  }
-
-  /**
-   * Called when element is removed from DOM
-   */
-  disconnectedCallback()${_typeAnnotations ? ': void' : ''} {
-    this._destroy();
-  }
-
-  // ==========================================================================
-  // INITIALIZATION
-  // ==========================================================================
-
-  _init()${_typeAnnotations ? ': void' : ''} {
-    // Parse config from data attributes
-    this._parseConfig();
-
-    // Cache DOM elements
-    this._cacheElements();
-
-    // Guard: required elements
-    if (!this._container) {
-      consoleMessage('FeaturedCollection: Missing container', 'warn');
-      return;
-    }
-
-    // Bind events
-    this._bindEvents();
-
-    this._isInitialized = true;
-    consoleMessage('FeaturedCollection initialized', 'info');
-  }
-
-  _parseConfig()${_typeAnnotations ? ': void' : ''} {
-    const _configAttr = this.dataset.config;
-    if (!_configAttr) return;
-
-    try {
-      const _parsed = JSON.parse(_configAttr);
-      this._config = { ...this._config, ..._parsed };
-    } catch {
-      consoleMessage('FeaturedCollection: Invalid config JSON', 'warn');
-    }
-  }
-
-  _cacheElements()${_typeAnnotations ? ': void' : ''} {
-    this._container = this.querySelector('.featured-collection__container');
-    this._slides = this.querySelectorAll('.featured-collection__slide');
-  }
-
-  _bindEvents()${_typeAnnotations ? ': void' : ''} {
-    // Example: bind click handler
-    // this._container?.addEventListener('click', this._handleClick);
-  }
-
-  // ==========================================================================
-  // CLEANUP
-  // ==========================================================================
-
-  _destroy()${_typeAnnotations ? ': void' : ''} {
-    // Remove event listeners
-    // this._container?.removeEventListener('click', this._handleClick);
-
-    // Clear references
-    this._container = null;
-    this._slides = null;
-    this._isInitialized = false;
-
-    consoleMessage('FeaturedCollection destroyed', 'info');
-  }
-
-  // ==========================================================================
-  // EVENT HANDLERS (use arrow functions to preserve 'this')
-  // ==========================================================================
-
-  _handleClick = (event${_typeAnnotations ? ': Event' : ''})${_typeAnnotations ? ': void' : ''} => {
-    const _target = event.target${_typeAnnotations ? ' as HTMLElement' : ''};
-
-    // Early return pattern
-    if (!_target) return;
-    if (!_target.closest('.featured-collection__item')) return;
-
-    // Main logic
-    consoleMessage('Item clicked', 'info', { target: _target });
-  };
-}
-
-// Note: Registration happens in sectionRegistry.ts
-// registerSection('featured-collection', 'featured-collection', FeaturedCollection);
+  const _configTypes = `// Keys mirror the setting ids in the Liquid schema, so they stay snake_case.
+export type ${_class}Config = {
+  readonly heading: string;
+  readonly button_label: string;
+};
 `;
 
   await writeFile(
-    `frontend/scripts/components/sections/featured-collection.${_ext}`,
-    _exampleSection
+    `frontend/scripts/components/sections/${_tag}.types.ts`,
+    _configTypes
   );
-  log(`Created: frontend/scripts/components/sections/featured-collection.${_ext}`, colors.green);
+  log(`Created: frontend/scripts/components/sections/${_tag}.types.ts`, colors.green);
+
+  const _component = `import { consoleMessage, defineElement, parseElementConfig } from '@/utils';
+import type { ${_class}Config } from './${_tag}.types';
+
+const DEFAULT_CONFIG: ${_class}Config = {
+  heading: '',
+  button_label: '',
+};
+
+export class ${_class} extends HTMLElement {
+  private controller: AbortController | null = null;
+  private config: ${_class}Config = DEFAULT_CONFIG;
+  private body: HTMLElement | null = null;
+  private isInitialized = false;
+
+  connectedCallback(): void {
+    if (this.isInitialized) return;
+
+    this.body = this.querySelector('.${_block}__body');
+
+    if (!this.body) {
+      consoleMessage('${_class}: missing body element', 'warn');
+      return;
+    }
+
+    this.config = parseElementConfig(this, DEFAULT_CONFIG);
+    this.controller = new AbortController();
+
+    this.body.addEventListener('click', this.handleClick, { signal: this.controller.signal });
+
+    this.isInitialized = true;
+  }
+
+  disconnectedCallback(): void {
+    this.controller?.abort();
+    this.controller = null;
+    this.body = null;
+    this.isInitialized = false;
+  }
+
+  private handleClick = (event: Event): void => {
+    const _action = (event.target as HTMLElement | null)?.closest('.${_block}__action');
+    if (!_action) return;
+
+    this.classList.toggle('is-active');
+  };
+}
+
+defineElement('${_tag}', ${_class});
+`;
+
+  await writeFile(`frontend/scripts/components/sections/${_tag}.ts`, _component);
+  log(`Created: frontend/scripts/components/sections/${_tag}.ts`, colors.green);
+
+  const _liquid = `{%- comment -%}
+  Reference section. The tag name must match the defineElement() call in
+  frontend/scripts/components/sections/${_tag}.ts.
+{%- endcomment -%}
+
+<${_tag}
+  class="${_block}"
+  data-section-id="{{ section.id }}"
+  data-config="{{ section.settings | json | escape }}"
+>
+  {%- if section.settings.heading != blank -%}
+    <h2 class="${_block}__heading">{{ section.settings.heading }}</h2>
+  {%- endif -%}
+
+  <div class="${_block}__body">
+    <button type="button" class="${_block}__action">
+      {{- section.settings.button_label -}}
+    </button>
+  </div>
+</${_tag}>
+
+{% schema %}
+{
+  "name": "Example",
+  "tag": "section",
+  "settings": [
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Example section"
+    },
+    {
+      "type": "text",
+      "id": "button_label",
+      "label": "Button label",
+      "default": "Toggle"
+    }
+  ],
+  "presets": [
+    {
+      "name": "Example"
+    }
+  ]
+}
+{% endschema %}
+`;
+
+  await mkdir('sections', { recursive: true });
+  await writeFile(`sections/${_tag}.liquid`, _liquid);
+  log(`Created: sections/${_tag}.liquid`, colors.green);
+
+  const _scss = `.${_block} {
+  display: block;
+  padding: var(--spacing-lg) var(--spacing-md);
+}
+
+.${_block}__heading {
+  margin: 0 0 var(--spacing-sm);
+}
+
+.${_block}__body {
+  display: grid;
+  gap: var(--spacing-sm);
+}
+
+.${_block}__action {
+  justify-self: start;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  transition: opacity var(--transition-base);
+}
+
+.${_block}.is-active .${_block}__action {
+  opacity: 0.6;
+}
+
+@media (min-width: 768px) {
+  .${_block} {
+    padding: var(--spacing-xl) var(--spacing-lg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .${_block}__action {
+    transition: none;
+  }
+}
+`;
+
+  await writeFile(`frontend/styles/sections/_${_tag}.scss`, _scss);
+  log(`Created: frontend/styles/sections/_${_tag}.scss`, colors.green);
 }
 
 // =============================================================================
@@ -1822,16 +1503,21 @@ export class FeaturedCollection extends HTMLElement {
 async function createClaudeMd(config: SetupConfig): Promise<void> {
   header('Creating CLAUDE.md Files');
 
-  // .claude/CLAUDE.md - Project rules
-  const _projectClaudeMd = `# ${config.projectName} - Project Rules
+  const _g = config.projectNameSafe;
+  const _ns = config.namespace;
+  const _tag = `${_ns}-carousel`;
+  const _class = `${toPascalCase(_ns)}Carousel`;
+
+  const _projectClaudeMd = `# ${config.projectName} — Project Rules
 
 ## Project Overview
 
-Shopify theme development project using Custom Elements + Section Registry pattern.
+Shopify theme development project. Every custom section is a custom element —
+the tag in the Liquid markup is what boots the behaviour. There is no registry.
 
-- **Styling**: ${config.stylingApproach.toUpperCase()}${config.stylingApproach === 'tailwind' ? ' (using @apply, NOT inline utilities)' : ''}
-- **JavaScript**: ${config.jsApproach === 'typescript' ? 'TypeScript' : 'Vanilla JavaScript'}
-- **Package Manager**: ${config.packageManager}
+- **Styling**: SCSS
+- **JavaScript**: TypeScript
+- **Package Manager**: yarn
 - **Build**: Vite + vite-plugin-shopify
 
 ---
@@ -1839,54 +1525,37 @@ Shopify theme development project using Custom Elements + Section Registry patte
 ## Critical Rules
 
 ### Build Commands
-- **MUST NOT** run \`${config.packageManager} run build\` unless explicitly requested
+- **MUST NOT** run \`yarn build\` unless explicitly requested
 - **MUST NOT** run \`shopify theme push\` unless explicitly requested
 
-### Code Style
+### Custom Elements
+- **MUST** register with \`defineElement()\` from \`@/utils\` at the bottom of the
+  component module, then add the module to \`components/sections/index.ts\`
+- **MUST** implement \`connectedCallback()\` and \`disconnectedCallback()\`
+- **MUST** release everything in \`disconnectedCallback()\`: listeners, observers,
+  timers, subscriptions. One \`AbortController\` passed as
+  \`addEventListener(..., { signal })\` removes them all at once and cannot drift
+  out of sync with the bind site.
+- **MUST** store handlers as arrow-function class fields — \`.bind(this)\` at the
+  call site creates a reference that can never be removed.
+- **MUST** guard against double init with an \`isInitialized\` flag.
+- **MUST NOT** add \`data-section-type\` or any registry lookup — the tag is the type.
 
-#### Naming Conventions
-- **MUST** prefix function-scoped variables with underscore: \`_element\`, \`_data\`
-- **MUST** use PascalCase for classes: \`FeaturedCollection\`, \`ProductCard\`
-- **MUST** use camelCase for functions: \`handleClick\`, \`initializeApp\`
-- **MUST** use UPPER_SNAKE_CASE for constants: \`BREAKPOINTS\`, \`ANIMATION\`
+### Naming
+- Function-scoped variables: \`_prefixed\` (\`_element\`, \`_config\`)
+- Class members: unprefixed (\`private container\`, not \`private _container\`)
+- Types and classes: \`PascalCase\`. Constants: \`UPPER_SNAKE_CASE\`
+- Functions: \`camelCase\` with an action verb (\`fetchCart\`, \`handleClick\`)
 
-#### Early Returns
+### Early Returns
 - **MUST** use guard clauses at the start of functions
 - **MUST NOT** nest conditions more than 2 levels deep
 
-\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
-// Correct: Guard clauses first
-_handleClick(event) {
-  const _target = event.target;
-
-  if (!_target) return;
-  if (!_target.dataset.productId) return;
-  if (this._isLoading) return;
-
-  // Main logic here
-  this._loadProduct(_target.dataset.productId);
-}
-
-// Wrong: Nested conditions
-_handleClick(event) {
-  if (event.target) {
-    if (event.target.dataset.productId) {
-      if (!this._isLoading) {
-        // Too nested
-      }
-    }
-  }
-}
-\`\`\`
-
 ### Logging
-- **MUST** use \`consoleMessage()\` utility, never \`console.log\` directly
-- Logging respects \`window.${config.projectNameSafe}.settings.devMode\`
-
-### Custom Elements
-- **MUST** check \`customElements.get()\` before registering
-- **MUST** implement \`connectedCallback()\` and \`disconnectedCallback()\`
-- **MUST** clean up event listeners in \`disconnectedCallback()\`
+- **MUST** use \`consoleMessage()\`, never \`console.log\` directly
+- Logging respects \`window.${_g}.settings.devMode\`
+- **Error-level logs must never be gated behind the debug flag.** A swallowed
+  initialisation error is exactly the one you need to see.
 
 ### State Classes
 - Use \`.is-active\`, \`.is-loading\`, \`.is-hidden\`, \`.is-open\`
@@ -1898,263 +1567,374 @@ _handleClick(event) {
 
 | Type | Location |
 |------|----------|
-| Section components | \`frontend/scripts/components/sections/\` |
+| Section components | \`frontend/scripts/components/sections/${_ns}-*.ts\` |
+| Section types | \`frontend/scripts/components/sections/${_ns}-*.types.ts\` |
+| Section barrel | \`frontend/scripts/components/sections/index.ts\` |
 | Shared components | \`frontend/scripts/components/shared/\` |
+| Global bootstrap | \`frontend/scripts/core/global.ts\` |
 | Utilities | \`frontend/scripts/utils/\` |
 | Constants | \`frontend/scripts/constants/\` |
-| Types | \`frontend/scripts/types/\` |
+| Shared types | \`frontend/scripts/types/\` |
 | Section styles | \`frontend/styles/sections/\` |
 | Component styles | \`frontend/styles/components/\` |
+
+One section = one Liquid file + one TypeScript file + one \`.types.ts\` companion
++ one SCSS partial, all sharing the \`${_ns}-<name>\` stem.
 
 ---
 
 ## Global Object
 
-Access via \`window.${config.projectNameSafe}\`:
+Access via \`window.${_g}\`:
 
-\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
-window.${config.projectNameSafe}.settings.devMode  // boolean
-window.${config.projectNameSafe}.theme.currency    // string
-window.${config.projectNameSafe}.cart.count        // number
-window.${config.projectNameSafe}.events            // EventTarget
+\`\`\`typescript
+window.${_g}.settings.devMode  // boolean — driven by a theme setting
+window.${_g}.theme.currency    // string
+window.${_g}.routes.cartAdd    // string — Liquid routes, never hardcode /cart/add
+window.${_g}.cart.count        // number — seeded from Liquid at first paint
+window.${_g}.events            // EventTarget
 \`\`\`
+
+Values come from \`snippets/${_ns}-theme-settings.liquid\`, which renders before
+the bundle. Anything Liquid knows and JavaScript needs belongs in that snippet.
 
 ---
 
 ## Events
 
-Dispatch events via:
-\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
-import { dispatchStoreEvent } from '@/utils';
+\`\`\`typescript
+import { dispatchStoreEvent, subscribeToStoreEvent } from '@/utils';
 
 dispatchStoreEvent('cart:updated', { count: 5 });
-\`\`\`
-
-Subscribe to events:
-\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
-import { subscribeToStoreEvent } from '@/utils';
 
 const unsubscribe = subscribeToStoreEvent('cart:updated', (event) => {
-  console.log(event.detail.count);
+  consoleMessage('cart', 'info', event.detail.count);
 });
-
-// Later: unsubscribe();
 \`\`\`
+
+---
+
+## The namespace rule
+
+Every custom Liquid file carries the \`${_ns}-\` prefix:
+
+| Kind | Path |
+|------|------|
+| Sections | \`sections/${_ns}-*.liquid\` |
+| Snippets | \`snippets/${_ns}-*.liquid\` |
+| Blocks | \`blocks/${_ns}-*.liquid\` |
+
+A base-theme upgrade is then: overwrite every file without the prefix, and
+whatever survives is ours. The prefix also gives every custom element tag the
+hyphen the spec requires.
+
+**Core theme files get additive edits only, and each one is a debt.** Record
+them in a table here. Before editing any other core file, try a theme setting, a
+section, a block, or a metafield first — those survive an upgrade untouched.
+
+### Baselines
+
+- Base theme: **TODO — record name and version**
+- \`shopify theme check\`: **TODO — record the offence count on day one.**
+  Pre-existing offences are not yours to fix; compare against that number rather
+  than aiming for zero.
+
+---
+
+## Performance
+
+The entry bundle does one thing: define tags. Nothing queries the DOM, fetches,
+or runs until an element is on the page. Protect that budget.
+
+- Heavy work goes behind \`await import('@/components/shared/…')\` inside
+  \`connectedCallback()\` — Vite splits the chunk, and only pages carrying the tag
+  pay for it.
+- Below-the-fold work goes behind \`whenVisible(this, fn)\`. Call the teardown it
+  returns from \`disconnectedCallback()\`.
+- Cache element references once on init. Never \`querySelector\` inside a handler
+  — delegate from the section root and use \`closest()\`.
+- Images come from Shopify's CDN with \`loading="lazy"\`, never a JS lazy-loader.
+
+---
+
+## Things that fail review
+
+- \`console.*\` anywhere outside the logging utility
+- Magic numbers in components — put them in \`frontend/scripts/constants/\`
+- Utility class names in Liquid (\`.flex\`, \`.mt-4\`) — semantic names only
+- A listener added in \`connectedCallback()\` with no matching teardown
+- \`querySelector\` called repeatedly in a handler instead of cached on init
+- Desktop-first CSS. Mobile is the base; \`@media (min-width: ...)\` adds
+- Animating \`width\`/\`height\`/\`top\`/\`left\` — use \`transform\` and \`opacity\`, and
+  honour \`@media (prefers-reduced-motion: reduce)\`
+
+---
+
+## Before committing
+
+\`yarn type-check && yarn lint && yarn build\`, then confirm \`shopify theme check\`
+still matches the recorded baseline.
 
 ---
 
 ## Quick Commands
 
 \`\`\`bash
-${config.packageManager} run dev       # Start development
-${config.packageManager} run build     # Build assets
-${config.packageManager} run deploy    # Deploy to Shopify
+yarn dev          # Start development
+yarn build        # Build assets
+yarn type-check   # tsc --noEmit
+yarn lint         # eslint frontend
+yarn deploy       # Build, then push — writes to the configured theme
 \`\`\`
 `;
 
-  await mkdir('.claude', { recursive: true });
   await writeFile('.claude/CLAUDE.md', _projectClaudeMd);
   log('Created: .claude/CLAUDE.md', colors.green);
 
-  // frontend/CLAUDE.md - Frontend development guide
   const _frontendClaudeMd = `# Frontend Development Guide
 
-## Custom Element Pattern
+## The tag is the initiator
 
-All section components are Custom Elements that extend \`HTMLElement\`.
+Every custom section is a custom element. There is no registry, no boot loop, no
+\`querySelectorAll\` pass. The tag appears in the DOM, the browser upgrades it,
+\`connectedCallback()\` runs.
 
-### Basic Structure
+That gives three things for free:
 
-\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
-export class MySection extends HTMLElement {
-  // Cache DOM references (prefix with _)
-  _container = null;
-  _button = null;
+- **Theme editor.** A setting change re-renders the section HTML, so the old
+  element is destroyed and a new one is constructed. \`shopify:section:load\` and
+  \`shopify:section:unload\` need no handling at all.
+- **Section Rendering API.** Markup fetched over AJAX boots on insert.
+- **Ordering.** No dependency on \`DOMContentLoaded\`.
 
-  // State (prefix with _)
-  _isInitialized = false;
-  _isLoading = false;
+### One section = four files
 
-  // Lifecycle: element added to DOM
-  connectedCallback() {
-    if (this._isInitialized) return;
-    this._init();
+| File | Purpose |
+|------|---------|
+| \`sections/${_tag}.liquid\` | Markup, \`<${_tag}>\` as the root |
+| \`frontend/scripts/components/sections/${_tag}.ts\` | Behaviour + \`defineElement()\` |
+| \`frontend/scripts/components/sections/${_tag}.types.ts\` | Config and any local types |
+| \`frontend/styles/sections/_${_tag}.scss\` | Styles |
+
+Tag names need a hyphen — the \`${_ns}-\` prefix satisfies that and matches the
+file namespace rule. Tag, Liquid filename, and TypeScript filename share one name.
+
+### Component
+
+\`\`\`typescript
+import { consoleMessage, defineElement, parseElementConfig } from '@/utils';
+import type { ${_class}Config } from './${_tag}.types';
+
+const DEFAULT_CONFIG: ${_class}Config = {
+  autoplay: false,
+  interval: 5000,
+};
+
+export class ${_class} extends HTMLElement {
+  private controller: AbortController | null = null;
+  private config: ${_class}Config = DEFAULT_CONFIG;
+  private track: HTMLElement | null = null;
+  private isInitialized = false;
+
+  connectedCallback(): void {
+    if (this.isInitialized) return;
+
+    this.track = this.querySelector('.${_tag}__track');
+
+    if (!this.track) {
+      consoleMessage('${_class}: missing track', 'warn');
+      return;
+    }
+
+    this.config = parseElementConfig(this, DEFAULT_CONFIG);
+    this.controller = new AbortController();
+
+    this.track.addEventListener('click', this.handleClick, { signal: this.controller.signal });
+
+    this.isInitialized = true;
   }
 
-  // Lifecycle: element removed from DOM
-  disconnectedCallback() {
-    this._destroy();
+  disconnectedCallback(): void {
+    this.controller?.abort();
+    this.controller = null;
+    this.track = null;
+    this.isInitialized = false;
   }
 
-  _init() {
-    this._cacheElements();
-    if (!this._container) return; // Guard clause
-    this._bindEvents();
-    this._isInitialized = true;
-  }
-
-  _cacheElements() {
-    this._container = this.querySelector('.my-section__container');
-    this._button = this.querySelector('.my-section__button');
-  }
-
-  _bindEvents() {
-    this._button?.addEventListener('click', this._handleClick);
-  }
-
-  _destroy() {
-    this._button?.removeEventListener('click', this._handleClick);
-    this._container = null;
-    this._button = null;
-    this._isInitialized = false;
-  }
-
-  // Arrow function to preserve 'this'
-  _handleClick = (event) => {
-    const _target = event.target;
-    if (!_target) return;
-    // Handle click
+  private handleClick = (event: Event): void => {
+    const _slide = (event.target as HTMLElement | null)?.closest('.${_tag}__slide');
+    if (!_slide) return;
   };
 }
+
+defineElement('${_tag}', ${_class});
 \`\`\`
 
-### Registration
+Then add one line to \`frontend/scripts/components/sections/index.ts\`:
 
-Register in \`sectionRegistry.${config.jsApproach === 'typescript' ? 'ts' : 'js'}\`:
-
-\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
-import { MySection } from '@/components/sections/my-section';
-
-registerSection('my-section', 'my-section', MySection, {
-  onBlockSelect: (event) => {
-    // Scroll to selected block in Theme Editor
-  },
-});
+\`\`\`typescript
+import './${_tag}';
 \`\`\`
 
-### Liquid Template
+That barrel is imported by \`frontend/entrypoints/storefront.ts\`. Forgetting it is
+the only way a section fails to mount.
+
+### Types
+
+Config and any section-local types live in the \`.types.ts\` companion, never in
+the component file:
+
+\`\`\`typescript
+// Keys mirror the setting ids in the Liquid schema, so they stay snake_case.
+export type ${_class}Config = {
+  readonly autoplay: boolean;
+  readonly interval: number;
+};
+\`\`\`
+
+Cross-section types (\`StorefrontGlobal\`, \`ShopifyBlockEvent\`, …) live in
+\`frontend/scripts/types/index.ts\`.
+
+### Liquid
 
 \`\`\`liquid
-<my-section
+<${_tag}
+  class="${_tag}"
   data-section-id="{{ section.id }}"
-  data-section-type="my-section"
-  data-config='{ "autoplay": {{ section.settings.autoplay }} }'
+  data-config="{{ section.settings | json | escape }}"
 >
-  <div class="my-section__container">
-    {% for block in section.blocks %}
-      <div class="my-section__item" {{ block.shopify_attributes }}>
-        ...
-      </div>
-    {% endfor %}
+  <div class="${_tag}__track">
+    {%- for block in section.blocks -%}
+      <div class="${_tag}__slide" {{ block.shopify_attributes }}>…</div>
+    {%- endfor -%}
   </div>
-</my-section>
+</${_tag}>
 \`\`\`
+
+\`data-config\` carries the whole settings object; \`parseElementConfig()\` merges it
+over the defaults and warns on malformed JSON. \`data-section-id\` stays for the
+Section Rendering API. There is no \`data-section-type\` — the tag is the type.
 
 ---
 
-## Theme Editor Integration
+## Theme editor
 
-The Section Registry handles these Shopify events:
+Load and unload are handled by the element lifecycle. The block events are the
+exception: they fire without re-rendering anything, so the element listens for
+them itself. They bubble from the block up through the section root.
 
-| Event | When Fired |
-|-------|------------|
-| \`shopify:section:load\` | Section added or settings changed |
-| \`shopify:section:unload\` | Section removed |
-| \`shopify:section:select\` | Section clicked in editor |
-| \`shopify:section:deselect\` | Section deselected |
-| \`shopify:block:select\` | Block clicked in editor |
-| \`shopify:block:deselect\` | Block deselected |
-
-Use callbacks when registering:
-
-\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
-registerSection('featured-collection', 'featured-collection', FeaturedCollection, {
-  onBlockSelect: (event) => {
-    const _blockId = event.detail.blockId;
-    // Scroll to block, highlight it, open accordion, etc.
-  },
-  onBlockDeselect: (event) => {
-    // Remove highlight
-  },
+\`\`\`typescript
+this.addEventListener('shopify:block:select', this.handleBlockSelect, {
+  signal: this.controller.signal,
 });
 \`\`\`
 
+| Event | Handled by |
+|-------|------------|
+| \`shopify:section:load\` | \`connectedCallback()\` — automatic |
+| \`shopify:section:unload\` | \`disconnectedCallback()\` — automatic |
+| \`shopify:section:select\` / \`:deselect\` | Listen on \`this\` if needed |
+| \`shopify:block:select\` / \`:deselect\` | Listen on \`this\` |
+
 ---
 
-## Styling${config.stylingApproach === 'scss' ? ' (SCSS)' : config.stylingApproach === 'tailwind' ? ' (Tailwind @apply)' : ' (CSS)'}
+## Rules that bite
 
-### Mobile-First
+- **\`disconnectedCallback()\` also fires on a DOM move**, not just removal. Reset
+  state so a reconnect re-initialises cleanly — that is what \`isInitialized = false\`
+  is for.
+- **Custom elements are \`display: inline\` by default.** Every section root needs
+  an explicit \`display\` in its SCSS partial.
+- **\`defineElement()\` guards the define call.** The theme editor re-evaluates the
+  bundle, and a duplicate \`customElements.define()\` throws.
+- **Handlers are arrow-function class fields.** \`.bind(this)\` at the call site
+  creates a new reference that can never be removed.
+- **Don't make every div an element.** Tags are for things with their own
+  lifecycle or state; inner markup stays classes and \`data-*\`.
 
-Always start with mobile styles, use media queries for larger screens.
+---
 
-${config.stylingApproach === 'scss' ? `\`\`\`scss
-.product-card {
-  padding: spacing('sm');  // Mobile
+## Keeping the bundle small
+
+The entry bundle does one thing: define tags. Nothing queries the DOM, nothing
+fetches, nothing runs until an element is actually on the page.
+
+**Heavy work goes behind a dynamic import**, which is also the code-splitting
+boundary — the chunk is fetched only by pages that contain the tag:
+
+\`\`\`typescript
+private async loadGallery(): Promise<void> {
+  try {
+    const { createGallery } = await import('@/components/shared/gallery');
+    createGallery(this, { signal: this.controller!.signal });
+  } catch {
+    consoleMessage('${_class}: chunk failed to load', 'error');
+  }
+}
+\`\`\`
+
+**Below-the-fold sections wait for the viewport.** \`whenVisible()\` returns a
+teardown, because an observer left running outlives the element:
+
+\`\`\`typescript
+connectedCallback(): void {
+  this.controller = new AbortController();
+  this.stopObserving = whenVisible(this, () => this.startAutoplay());
+}
+
+disconnectedCallback(): void {
+  this.stopObserving?.();
+  this.controller?.abort();
+}
+\`\`\`
+
+**Rules of thumb**
+
+- Cache element references once in \`connectedCallback()\`. Never \`querySelector\`
+  inside a handler — delegate from the section root and use \`closest()\`.
+- One \`AbortController\` per element beats one listener per child node.
+- Anything that measures layout (\`getBoundingClientRect\`, \`offsetWidth\`) belongs
+  in a \`requestAnimationFrame\`, and never in a scroll or resize handler without
+  \`throttle()\`.
+- Images come from Shopify's CDN with \`loading="lazy"\` — never a JS lazy-loader.
+- \`vite/modulepreload-polyfill\` stays in the entrypoint. It is inert today, and
+  it is what makes the dynamic-import pattern above work on older Safari.
+
+---
+
+## Styling (SCSS)
+
+Mobile first, BEM, state classes:
+
+\`\`\`scss
+.${_tag} {
+  display: block;
+  padding: var(--spacing-md);
 
   @include min('md') {
-    padding: spacing('md');  // Tablet+
+    padding: var(--spacing-lg);
   }
 
-  @include min('lg') {
-    padding: spacing('lg');  // Desktop+
-  }
-}
-\`\`\`` : config.stylingApproach === 'tailwind' ? `\`\`\`css
-/* Use @apply in CSS files, NOT inline in Liquid */
-.product-card {
-  @apply p-2;  /* Mobile */
-
-  @screen md {
-    @apply p-4;  /* Tablet+ */
-  }
-
-  @screen lg {
-    @apply p-8;  /* Desktop+ */
-  }
-}
-\`\`\`` : `\`\`\`css
-.product-card {
-  padding: var(--spacing-sm);  /* Mobile */
-}
-
-@media (min-width: 768px) {
-  .product-card {
-    padding: var(--spacing-md);  /* Tablet+ */
-  }
-}
-
-@media (min-width: 1024px) {
-  .product-card {
-    padding: var(--spacing-lg);  /* Desktop+ */
-  }
-}
-\`\`\``}
-
-### BEM Naming
-
-\`\`\`${config.stylingApproach === 'scss' ? 'scss' : 'css'}
-.product-card {           /* Block */
-  &__image { }            /* Element */
-  &__title { }
-  &__price { }
-  &--featured { }         /* Modifier */
-  &.is-loading { }        /* State */
+  &__track { }
+  &__slide { }
+  &--boxed { }
+  &.is-loading { }
 }
 \`\`\`
 
 ---
 
-## Pre-Flight Checklist
+## Pre-flight
 
-Before committing:
-
-- [ ] Custom Element has \`connectedCallback\` and \`disconnectedCallback\`
-- [ ] All event listeners are removed in \`disconnectedCallback\`
-- [ ] Guard clauses used for early returns
-- [ ] Variables prefixed with \`_\` (function scope)
-- [ ] Logging uses \`consoleMessage()\`
-- [ ] Mobile-first styles
-- [ ] Tested in Theme Editor (block select/deselect)
+- [ ] \`connectedCallback()\` and \`disconnectedCallback()\` both present
+- [ ] Everything allocated is released via the \`AbortController\` or in \`disconnectedCallback()\`
+- [ ] \`defineElement()\` called at the bottom of the module
+- [ ] Module imported in \`components/sections/index.ts\`
+- [ ] Config type in the \`.types.ts\` companion
+- [ ] Guard clauses for early returns; function-scoped vars \`_prefixed\`
+- [ ] Logging via \`consoleMessage()\`
+- [ ] Root has an explicit \`display\`; styles are mobile-first
+- [ ] Tested in the theme editor, including block select
 `;
 
   await writeFile('frontend/CLAUDE.md', _frontendClaudeMd);
@@ -2164,6 +1944,10 @@ Before committing:
 async function createAgents(config: SetupConfig): Promise<void> {
   header('Creating Claude Agents');
 
+  const _ns = config.namespace;
+  const _tag = `${_ns}-carousel`;
+  const _class = `${toPascalCase(_ns)}Carousel`;
+
   // ui-design agent
   const _uiDesignAgent = `# UI Design Agent
 
@@ -2171,7 +1955,7 @@ You are a UI/UX design specialist for Shopify theme development.
 
 ## Expertise
 
-- ${config.stylingApproach === 'scss' ? 'SCSS with design tokens and mixins' : config.stylingApproach === 'tailwind' ? 'Tailwind CSS using @apply directives (NOT inline utilities)' : 'CSS with custom properties'}
+- SCSS with design tokens and mixins
 - Mobile-first responsive design
 - BEM naming conventions
 - Semantic class names (no utility classes in markup)
@@ -2186,10 +1970,9 @@ You are a UI/UX design specialist for Shopify theme development.
 4. **Animations**: CSS transitions only, respect reduced motion
 5. **Performance**: Avoid animating width/height, use transform/opacity
 
-${config.stylingApproach === 'scss' ? `## SCSS Patterns
+## SCSS Patterns
 
 \`\`\`scss
-// Use design tokens
 .component {
   padding: spacing('md');
   color: color('text');
@@ -2199,36 +1982,11 @@ ${config.stylingApproach === 'scss' ? `## SCSS Patterns
     padding: spacing('lg');
   }
 }
-\`\`\`` : config.stylingApproach === 'tailwind' ? `## Tailwind @apply Patterns
-
-\`\`\`css
-/* CORRECT: @apply in CSS files */
-.product-card {
-  @apply flex flex-col gap-4 p-4;
-  @apply bg-white rounded-lg shadow-sm;
-  @apply transition-shadow duration-200;
-}
-
-/* WRONG: Inline utilities in Liquid */
-<div class="flex flex-col gap-4 p-4">  <!-- NO -->
-\`\`\`` : `## CSS Patterns
-
-\`\`\`css
-.component {
-  padding: var(--spacing-md);
-  transition: var(--transition-base);
-}
-
-@media (min-width: 768px) {
-  .component {
-    padding: var(--spacing-lg);
-  }
-}
-\`\`\``}
+\`\`\`
 
 ## Reduced Motion
 
-\`\`\`${config.stylingApproach === 'scss' ? 'scss' : 'css'}
+\`\`\`scss
 @media (prefers-reduced-motion: reduce) {
   .animated-element {
     animation: none;
@@ -2244,83 +2002,99 @@ ${config.stylingApproach === 'scss' ? `## SCSS Patterns
   // code-writer agent
   const _codeWriterAgent = `# Code Writer Agent
 
-You are a ${config.jsApproach === 'typescript' ? 'TypeScript' : 'JavaScript'} specialist for Shopify theme development.
+You are a TypeScript specialist for Shopify theme development.
 
 ## Expertise
 
-- Custom Elements (Web Components)
-- Section Registry pattern
-- Shopify Theme Editor integration
+- Custom elements as section initiators
+- Shopify theme editor integration
 - Event-driven architecture
-- Performance optimization
+- Keeping the entry bundle small
 
 ## Key Rules
 
-### Naming
-- Prefix function-scoped variables: \`_element\`, \`_data\`, \`_config\`
-- PascalCase for classes: \`FeaturedCollection\`
-- camelCase for methods: \`handleClick\`
+### The tag is the initiator
 
-### Early Returns
-\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
-// CORRECT
-_handleClick(event) {
-  const _target = event.target;
-  if (!_target) return;
-  if (!_target.dataset.id) return;
+A section is a custom element. There is no registry and no \`data-section-type\` —
+the tag boots the behaviour, and the theme editor's re-render gives you load and
+unload for free.
 
-  // Main logic
-}
+\`\`\`typescript
+import { consoleMessage, defineElement, parseElementConfig } from '@/utils';
+import type { ${_class}Config } from './${_tag}.types';
 
-// WRONG - too nested
-_handleClick(event) {
-  if (event.target) {
-    if (event.target.dataset.id) {
-      // Main logic
+const DEFAULT_CONFIG: ${_class}Config = { autoplay: false };
+
+export class ${_class} extends HTMLElement {
+  private controller: AbortController | null = null;
+  private config: ${_class}Config = DEFAULT_CONFIG;
+  private track: HTMLElement | null = null;
+  private isInitialized = false;
+
+  connectedCallback(): void {
+    if (this.isInitialized) return;
+
+    this.track = this.querySelector('.${_tag}__track');
+
+    if (!this.track) {
+      consoleMessage('${_class}: missing track', 'warn');
+      return;
     }
+
+    this.config = parseElementConfig(this, DEFAULT_CONFIG);
+    this.controller = new AbortController();
+
+    this.track.addEventListener('click', this.handleClick, { signal: this.controller.signal });
+
+    this.isInitialized = true;
   }
+
+  disconnectedCallback(): void {
+    this.controller?.abort();
+    this.controller = null;
+    this.track = null;
+    this.isInitialized = false;
+  }
+
+  private handleClick = (event: Event): void => {
+    const _slide = (event.target as HTMLElement | null)?.closest('.${_tag}__slide');
+    if (!_slide) return;
+  };
 }
+
+defineElement('${_tag}', ${_class});
 \`\`\`
 
-### Custom Element Structure
-\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
-export class MyComponent extends HTMLElement {
-  _container = null;
-  _isInitialized = false;
+Then add \`import './${_tag}';\` to \`frontend/scripts/components/sections/index.ts\`.
+That barrel import is the only thing that registers a section.
 
-  connectedCallback() {
-    if (this._isInitialized) return;
-    this._init();
-  }
+### Non-negotiables
 
-  disconnectedCallback() {
-    this._destroy();
-  }
+- One \`AbortController\` per element, aborted in \`disconnectedCallback()\`
+- Handlers are arrow-function class fields — \`.bind(this)\` never detaches
+- \`isInitialized\` guard, reset on disconnect (it also fires on a DOM move)
+- Config type lives in the \`.types.ts\` companion, never in the component file
+- Guard clauses first; never nest more than two levels
+- Function-scoped variables \`_prefixed\`; class members unprefixed
 
-  _init() {
-    this._cacheElements();
-    this._bindEvents();
-    this._isInitialized = true;
-  }
+### Performance
 
-  _destroy() {
-    // MUST remove all event listeners
-    this._container = null;
-    this._isInitialized = false;
-  }
-
-  // Arrow function preserves 'this'
-  _handleClick = (event) => { };
-}
-\`\`\`
+- Heavy dependencies go behind \`await import(...)\` inside \`connectedCallback()\`
+- Below-the-fold work goes behind \`whenVisible(this, fn)\`; call its teardown on
+  disconnect
+- Cache element references on init — never \`querySelector\` inside a handler.
+  Delegate from the root and use \`closest()\`
 
 ### Logging
-- ALWAYS use \`consoleMessage()\` from \`@/utils\`
-- NEVER use \`console.log\` directly
+
+- ALWAYS use \`consoleMessage()\` from \`@/utils\`; NEVER \`console.log\`
+- Error-level logs are never gated behind the debug flag
 
 ### Events
+
 - Dispatch: \`dispatchStoreEvent('cart:updated', { count: 5 })\`
-- Subscribe: \`subscribeToStoreEvent('cart:updated', handler)\`
+- Subscribe: \`subscribeToStoreEvent('cart:updated', handler)\` — keep the
+  returned unsubscribe and call it on disconnect
 `;
 
   await writeFile('.claude/agents/code-writer.md', _codeWriterAgent);
@@ -2343,28 +2117,27 @@ You are a Shopify Liquid template specialist.
 
 ### Section Structure
 \`\`\`liquid
-{% comment %} sections/my-section.liquid {% endcomment %}
+{% comment %} sections/${_ns}-my-section.liquid {% endcomment %}
 
-<my-section
+<${_ns}-my-section
+  class="${_ns}-my-section"
   data-section-id="{{ section.id }}"
-  data-section-type="my-section"
-  data-config='{ "setting": {{ section.settings.value | json }} }'
+  data-config="{{ section.settings | json | escape }}"
 >
-  <div class="my-section">
-    {% for block in section.blocks %}
-      {%- case block.type -%}
-        {%- when 'item' -%}
-          <div class="my-section__item" {{ block.shopify_attributes }}>
-            {{ block.settings.title }}
-          </div>
-      {%- endcase -%}
-    {% endfor %}
-  </div>
-</my-section>
+  {% for block in section.blocks %}
+    {%- case block.type -%}
+      {%- when 'item' -%}
+        <div class="${_ns}-my-section__item" {{ block.shopify_attributes }}>
+          {{ block.settings.title }}
+        </div>
+    {%- endcase -%}
+  {% endfor %}
+</${_ns}-my-section>
 
 {% schema %}
 {
   "name": "My Section",
+  "tag": "section",
   "settings": [],
   "blocks": [
     {
@@ -2389,10 +2162,12 @@ You are a Shopify Liquid template specialist.
 \`\`\`
 
 ### Custom Element Tags
-- Use Custom Element tag as section wrapper
-- Include \`data-section-id\` and \`data-section-type\`
-- Pass config via \`data-config\` JSON attribute
-- Add \`{{ block.shopify_attributes }}\` to blocks for Theme Editor
+- The custom element tag IS the section wrapper and the only initiator — there is
+  no registry and no \`data-section-type\`
+- Tag name matches the Liquid filename: \`sections/${_ns}-foo.liquid\` → \`<${_ns}-foo>\`
+- Include \`data-section-id\` for the Section Rendering API
+- Pass the whole settings object via \`data-config="{{ section.settings | json | escape }}"\`
+- Add \`{{ block.shopify_attributes }}\` to blocks for the theme editor
 
 ### Performance
 - Avoid N+1 queries in loops
@@ -2429,7 +2204,7 @@ You are a web accessibility specialist for Shopify themes.
 ## Key Rules
 
 ### Focus Management
-\`\`\`${config.jsApproach === 'typescript' ? 'typescript' : 'javascript'}
+\`\`\`typescript
 // Trap focus in modals
 _trapFocus(container) {
   const _focusable = container.querySelectorAll(
@@ -2473,7 +2248,7 @@ _trapFocus(container) {
 \`\`\`
 
 ### Reduced Motion
-\`\`\`${config.stylingApproach === 'scss' ? 'scss' : 'css'}
+\`\`\`scss
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.01ms !important;
@@ -2534,17 +2309,13 @@ async function pullTheme(config: SetupConfig): Promise<void> {
   }
 }
 
-async function runInitialBuild(config: SetupConfig): Promise<void> {
+async function runInitialBuild(): Promise<void> {
   header('Running Initial Build');
 
   try {
     log('Building assets...', colors.cyan);
 
-    if (config.packageManager === 'bun') {
-      await $`bun run build`;
-    } else {
-      await $`yarn build`;
-    }
+    await $`yarn build`;
 
     log('Build completed successfully', colors.green);
   } catch (_error) {
@@ -2565,15 +2336,15 @@ function displayNextSteps(config: SetupConfig): void {
   console.log();
 
   log('1. Start development:', colors.cyan);
-  log(`   ${config.packageManager} run dev`, colors.yellow);
+  log('   yarn dev', colors.yellow);
   console.log();
 
   log('2. Build assets:', colors.cyan);
-  log(`   ${config.packageManager} run build`, colors.yellow);
+  log('   yarn build', colors.yellow);
   console.log();
 
   log('3. Deploy to Shopify:', colors.cyan);
-  log(`   ${config.packageManager} run deploy`, colors.yellow);
+  log('   yarn deploy', colors.yellow);
   console.log();
 
   log('4. Read the documentation:', colors.cyan);
@@ -2627,16 +2398,16 @@ async function main(): Promise<void> {
     await installDependencies();
     await createDirectoryStructure(_config);
     await createViteConfig(_config);
-    await createPostCSSConfig(_config);
-    await createTypeScriptConfig(_config);
+    await createPostCSSConfig();
+    await createTypeScriptConfig();
     await createShopifyThemeToml(_config);
     await createGitIgnore(_config);
     await createShopifyIgnore();
     await createGitHubWorkflow(_config);
     await createEntrypoints(_config);
     await createUtilities(_config);
-    await createConstants(_config);
-    await createSectionRegistry(_config);
+    await createConstants();
+    await createSectionBarrel(_config);
     await createExampleSection(_config);
     await createClaudeMd(_config);
     await createAgents(_config);
@@ -2645,7 +2416,7 @@ async function main(): Promise<void> {
       await pullTheme(_config);
     }
 
-    await runInitialBuild(_config);
+    await runInitialBuild();
 
     displayNextSteps(_config);
   } catch (_error) {
