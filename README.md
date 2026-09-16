@@ -1,6 +1,6 @@
 # Secure Shopify Development Workflow with Vite
 
-A production-ready, security-focused Shopify theme development environment utilizing Vite for modern asset bundling, Bun for high-performance package management, and automated CI/CD workflows.
+A production-ready, security-focused Shopify theme development environment utilizing Vite for modern asset bundling, Yarn 4 for deterministic dependency management, and automated CI/CD workflows.
 
 ## Table of Contents
 
@@ -24,7 +24,7 @@ This development environment is designed to work seamlessly with **coding agents
 
 - **Security-First**: No PII or client data exposure, comprehensive .gitignore and .shopifyignore configurations
 - **Modern Tooling**: Vite for lightning-fast HMR and optimized builds
-- **High Performance**: Bun runtime for 3-10x faster package operations
+- **Deterministic installs**: Yarn 4 with an immutable lockfile, pinned via `packageManager`
 - **Agent-Friendly**: Structured guidelines in `project_setup.md` for consistent AI-assisted development
 - **Production Ready**: Automated builds, testing, and deployment workflows
 - **Framework Agnostic**: Vanilla JS by default, easily extensible to TypeScript, React, Vue, etc.
@@ -98,7 +98,9 @@ package.json
 | Component | Technology | Rationale |
 |-----------|-----------|-----------|
 | **Build Tool** | Vite 5.x | Sub-second HMR, optimized production builds, native ESM support |
-| **Runtime** | Bun 1.3+ | 3-10x faster than npm/yarn, built-in TypeScript support, native bundler |
+| **Runtime** | Node 22 | Matches the CI runner; Corepack activates the pinned Yarn |
+| **Package Manager** | Yarn 4 (Berry) | Immutable lockfile, `nodeLinker: node-modules` so the Shopify CLI can spawn binaries |
+| **Language** | TypeScript 5 | `strict`, `verbatimModuleSyntax`, type-checked in CI |
 | **Asset Pipeline** | vite-plugin-shopify | Seamless integration with Shopify theme structure |
 | **CSS Processing** | PostCSS + Autoprefixer | Cross-browser compatibility, modern CSS features |
 | **Bundling** | Rollup (via Vite) | Tree-shaking, code-splitting, optimized chunks |
@@ -124,22 +126,18 @@ HMR Update:
 - Vite: 20-100ms
 ```
 
-#### 2. Bun Over npm/yarn
+#### 2. Yarn 4 Over npm
 
-**Why Bun?**
-- **Installation Speed**: 3-10x faster package installation
-- **Runtime Performance**: Native JavaScript/TypeScript execution
-- **Built-in Tools**: Bundler, transpiler, test runner included
-- **Drop-in Replacement**: Compatible with npm packages
+**Why Yarn 4?**
+- **Reproducible CI**: `yarn install --immutable` fails rather than silently
+  resolving a different tree
+- **Pinned toolchain**: `packageManager` in package.json plus Corepack means the
+  runner and a laptop use the identical Yarn version
+- **Fast, shared cache**: `enableGlobalCache` keeps installs cheap across branches
 
-**Benchmark Comparison**:
-```
-Install 300 packages:
-- npm: 30-60 seconds
-- yarn: 20-40 seconds
-- pnpm: 15-30 seconds
-- Bun: 3-8 seconds
-```
+**`nodeLinker: node-modules` is deliberate.** Yarn PnP breaks both the Shopify
+CLI and vite-plugin-shopify, which resolve and spawn binaries from a real
+`node_modules` tree.
 
 #### 3. Build Configuration Decisions
 
@@ -214,11 +212,11 @@ bun setup.ts
 If you prefer manual setup or need to understand the process:
 
 ```bash
-# 1. Initialize Bun
-bun init -y
+# 1. Activate the pinned Yarn
+corepack enable
 
 # 2. Install dependencies
-bun add -d vite vite-plugin-shopify postcss autoprefixer npm-run-all @shopify/theme-check-node
+yarn install
 
 # 3. Create directory structure
 mkdir -p frontend/entrypoints frontend/scripts frontend/styles
@@ -229,10 +227,10 @@ mkdir -p frontend/entrypoints frontend/scripts frontend/styles
 # - package.json scripts
 
 # 5. Build assets
-bun run build
+yarn build
 
 # 6. Start development
-bun run dev
+yarn dev
 ```
 
 For detailed manual setup instructions, see [`project_setup.md`](./project_setup.md).
@@ -293,15 +291,17 @@ shopify-theme/
 
 ```bash
 # Start development server (Vite + Shopify CLI)
-bun run dev
+yarn dev
+
+# Quality gates
+yarn type-check
+yarn lint
 
 # Build for production
-bun run build
+yarn build
 
-# Deploy to Shopify
-bun run deploy                    # Development environment
-bun run deploy:staging            # Staging environment
-bun run deploy:production         # Production environment
+# Deploy — writes to the LIVE theme, never run unprompted
+yarn deploy
 ```
 
 ### Environment Management
@@ -311,12 +311,15 @@ The setup supports multiple Shopify environments:
 ```json
 {
   "scripts": {
-    "dev": "run-p -sr \"shopify:dev\" \"vite:dev\"",
-    "dev:staging": "run-p -sr \"shopify:dev:staging\" \"vite:dev\"",
-    "dev:production": "run-p -sr \"shopify:dev:production\" \"vite:dev\""
+    "dev": "run-s -s \"clean\" \"dev:serve\" --",
+    "dev:serve": "run-p -sr \"shopify:dev\" \"vite:dev\" --",
+    "shopify:dev": "shopify theme dev --environment development --live-reload=hot-reload"
   }
 }
 ```
+
+Environments live in `shopify.theme.toml`. Today only `development` exists, and
+it points at the **live** theme.
 
 **Environment configuration in Shopify CLI**:
 ```bash
@@ -324,7 +327,7 @@ The setup supports multiple Shopify environments:
 shopify theme dev --environment development --store your-store.myshopify.com
 
 # Subsequent runs
-bun run dev  # Uses saved environment
+yarn dev  # Uses saved environment
 ```
 
 ### Hot Module Replacement (HMR)
@@ -338,7 +341,7 @@ Vite provides instant feedback during development:
 ### Build Process
 
 ```bash
-bun run build
+yarn build
 ```
 
 **What happens**:
@@ -531,109 +534,132 @@ class ProductCard {
 
 #### 2. ES Modules and Imports
 
-Use modern ES module syntax:
+TypeScript with ES modules. Two aliases, declared in both `vite.config.js` and
+`tsconfig.json`:
 
-```javascript
-// ✅ CORRECT: Named imports
-import { consoleMessage, formatPrice } from '~/scripts/utils';
-import { BaseComponent } from '~/scripts/components/baseComponent';
+```typescript
+// ✅ CORRECT: @ for frontend/scripts, ~ for anything else under frontend/
+import { consoleMessage, defineElement, parseElementConfig } from '@/utils';
+import type { StorefrontGlobal } from '@/types';
 
-// ✅ CORRECT: Default imports
-import ProductCard from '~/scripts/components/productCard';
+// ✅ CORRECT: a section's .types.ts companion is a sibling
+import type { MbCarouselConfig } from './mb-carousel.types';
 
-// ✅ CORRECT: Aliased imports
-import { formatPrice as formatCurrency } from '~/scripts/utils';
-
-// ❌ WRONG: CommonJS (not supported in Vite)
+// ❌ WRONG: CommonJS is not supported by Vite
 const utils = require('./utils');
 ```
 
-**Alias `~` for imports**:
-```javascript
-// Configured in vite.config.js
-alias: {
-  '~': fileURLToPath(new URL('./frontend', import.meta.url)),
-}
+Type-only imports must use `import type` — `verbatimModuleSyntax` is enabled.
 
-// Use in code
-import { debounce } from '~/scripts/hooks/useDebounce';
+#### 3. Component Architecture: the tag is the initiator
+
+Every custom section is a custom element. The tag in the Liquid markup boots the
+behaviour — there is no registry, no boot loop, no `querySelectorAll` pass. The
+browser upgrades the element and calls `connectedCallback()`.
+
+```typescript
+// frontend/scripts/components/sections/mb-cart-drawer.types.ts
+export type MbCartDrawerConfig = {
+  readonly close_on_escape: boolean;
+};
 ```
 
-#### 3. Component Architecture
+```typescript
+// frontend/scripts/components/sections/mb-cart-drawer.ts
+import { consoleMessage, defineElement, parseElementConfig } from '@/utils';
+import type { MbCartDrawerConfig } from './mb-cart-drawer.types';
 
-Use class-based components extending `BaseComponent`:
+const DEFAULT_CONFIG: MbCartDrawerConfig = { close_on_escape: true };
 
-```javascript
-import { BaseComponent } from '~/scripts/components/baseComponent';
+export class MbCartDrawer extends HTMLElement {
+  private controller: AbortController | null = null;
+  private config: MbCartDrawerConfig = DEFAULT_CONFIG;
+  private panel: HTMLElement | null = null;
+  private isInitialized = false;
 
-export class CartDrawer extends BaseComponent {
-  constructor(selector) {
-    super(selector);
-    this.isOpen = false;
+  connectedCallback(): void {
+    if (this.isInitialized) return;
+
+    this.panel = this.querySelector('.mb-cart-drawer__panel');
+
+    if (!this.panel) {
+      consoleMessage('MbCartDrawer: missing panel', 'warn');
+      return;
+    }
+
+    this.config = parseElementConfig(this, DEFAULT_CONFIG);
+    this.controller = new AbortController();
+
+    const { signal } = this.controller;
+    this.addEventListener('click', this.handleClick, { signal });
+
+    if (this.config.close_on_escape) {
+      document.addEventListener('keydown', this.handleKeydown, { signal });
+    }
+
+    this.isInitialized = true;
   }
 
-  setupElement(element) {
-    // Called for each element matching selector
-    this.toggleButton = element.querySelector('.cart-toggle');
-    this.closeButton = element.querySelector('.cart-close');
-    this.overlay = element.querySelector('.cart-overlay');
-
-    this.toggleButton?.addEventListener('click', this.open.bind(this));
-    this.closeButton?.addEventListener('click', this.close.bind(this));
-    this.overlay?.addEventListener('click', this.close.bind(this));
+  disconnectedCallback(): void {
+    this.controller?.abort();
+    this.controller = null;
+    this.panel = null;
+    this.isInitialized = false;
   }
 
-  open() {
-    this.isOpen = true;
-    this.element.classList.add('is-open');
-    document.body.style.overflow = 'hidden';
-  }
+  private handleClick = (event: Event): void => {
+    const _toggle = (event.target as HTMLElement | null)?.closest('[data-cart-toggle]');
+    if (!_toggle) return;
 
-  close() {
-    this.isOpen = false;
-    this.element.classList.remove('is-open');
-    document.body.style.overflow = '';
-  }
+    this.classList.toggle('is-open');
+  };
 
-  destroy() {
-    // Cleanup event listeners
-    this.toggleButton?.removeEventListener('click', this.open);
-    this.closeButton?.removeEventListener('click', this.close);
-    super.destroy();
-  }
+  private handleKeydown = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape') return;
+
+    this.classList.remove('is-open');
+  };
 }
 
-// Initialize
-new CartDrawer('.cart-drawer');
+defineElement('mb-cart-drawer', MbCartDrawer);
 ```
 
-#### 4. Section Lifecycle Hooks
+One `AbortController` owns every listener, so `disconnectedCallback()` releases
+them all at once and can never drift out of sync with the bind sites.
 
-For Shopify section-specific code, use `useSectionLifecycle`:
+Register it by adding one line to `frontend/scripts/components/sections/index.ts`:
 
-```javascript
-import { useSectionLifecycle } from '~/scripts/hooks/useSectionLifecycle';
-import { ProductCard } from '~/scripts/components/productCard';
+```typescript
+import './mb-cart-drawer';
+```
 
-useSectionLifecycle('featured-collection', {
-  onLoad: (root) => {
-    // Initialize when section loads (page load or theme editor)
-    const productCards = new ProductCard('.product-card', root);
+#### 4. Theme Editor Lifecycle
 
-    return { productCards }; // Return instance for onUnload
-  },
+Section load and unload need no code. A setting change re-renders the section
+HTML, which destroys the old element and constructs a new one — the element
+lifecycle already covers it. The same is true of markup fetched through the
+Section Rendering API.
 
-  onUnload: (root, instance) => {
-    // Cleanup when section unloads (theme editor)
-    instance.productCards.destroy();
-  }
-});
+Block select and deselect are the exception: they fire without re-rendering
+anything. The events bubble from the block up through the section root, so the
+element listens on itself:
+
+```typescript
+this.addEventListener('shopify:block:select', this.handleBlockSelect, { signal });
+```
+
+```typescript
+private handleBlockSelect = (event: Event): void => {
+  const _blockId = (event as ShopifyBlockEvent).detail.blockId;
+  this.scrollToBlock(_blockId);
+};
 ```
 
 **Rationale**:
-- **Theme Editor Support**: Sections reload dynamically in Shopify admin
-- **Memory Management**: Proper cleanup prevents memory leaks
-- **Consistency**: All sections follow same lifecycle pattern
+- **Fewer moving parts**: the tag name is the single source of truth — no
+  `data-section-type`, no registry map to keep in sync
+- **Memory management**: one `AbortController` per element, aborted on disconnect
+- **Works everywhere**: AJAX-inserted markup boots identically to server-rendered
 
 ---
 
@@ -660,19 +686,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
-      - name: Install dependencies
-        run: bun install
+      # Corepack must run before any yarn call.
+      - run: corepack enable
 
-      - name: Build Vite assets
-        run: bun run build
+      - run: yarn install --immutable
+      - run: yarn type-check
+      - run: yarn lint
+      - run: yarn build
 
-      - name: Check for uncommitted changes
-        run: |
-          git diff --exit-code assets/ || \
-          (echo "❌ Built assets are out of sync. Run 'bun run build' and commit." && exit 1)
+      - name: Verify assets are in sync (PR)
+        if: github.event_name == 'pull_request'
+        run: git diff --exit-code assets/ snippets/vite-tag.liquid
 
       - name: Upload assets artifact
         uses: actions/upload-artifact@v4
@@ -684,7 +712,7 @@ jobs:
 ### Workflow Logic
 
 1. **Trigger**: Runs on every push/PR to `main` or `develop`
-2. **Environment**: Sets up Bun on Ubuntu runner
+2. **Environment**: Node 22 on the Ubuntu runner, Yarn activated through Corepack
 3. **Install**: Fetches all dependencies from `package.json`
 4. **Build**: Compiles `frontend/` → `assets/`
 5. **Validation**: Fails if built assets differ from committed assets
@@ -696,9 +724,9 @@ jobs:
 
 ```bash
 # After making changes
-bun run build
+yarn build
 git add assets/
-git commit -m "Build: Update compiled assets"
+git commit -m "chore(assets): compile theme assets"
 git push
 ```
 
@@ -854,7 +882,7 @@ When an AI agent creates a new component:
 - [ ] Follow mobile-first responsive design
 - [ ] Add JSDoc comments for functions
 - [ ] Test in Shopify theme editor (section lifecycle)
-- [ ] Build assets (`bun run build`)
+- [ ] Build assets (`yarn build`)
 - [ ] Commit built assets with source code
 
 ---
@@ -940,14 +968,14 @@ This is the most reliable approach for theme editor development:
 
 3. **Important: Downgrade Vite to 6.0.8** (critical for tunnel support):
    ```bash
-   bun add -d vite@6.0.8
+   yarn add -D vite@6.0.8
    ```
 
    **Why?** Vite versions 6.0.9+ and 7.x have a bug where `allowedHosts: 'all'` doesn't work, causing the tunnel to return "Invalid Host header" errors. Version 6.0.8 is the last stable version for tunnel-based development.
 
 4. **Restart dev server**:
    ```bash
-   bun run dev
+   yarn dev
    ```
 
 **How it works**:
@@ -995,25 +1023,26 @@ If you prefer not to use tunneling:
 
 **Solution**:
 ```bash
-bun run build
+yarn build
 git add assets/
-git commit -m "build: Update compiled assets"
+git commit -m "build: update compiled assets"
 git push
 ```
 
 #### Issue: Section not working in theme editor
 
-**Cause**: Missing section lifecycle hooks
+**Cause**: The section module was never imported, so its tag was never defined.
 
-**Solution**: Use `useSectionLifecycle` for all section-specific code:
-```javascript
-import { useSectionLifecycle } from '~/scripts/hooks/useSectionLifecycle';
-
-useSectionLifecycle('section-type', {
-  onLoad: (root) => { /* init */ },
-  onUnload: (root, instance) => { /* cleanup */ }
-});
+**Solution**: Add it to the barrel — that import is the only thing that registers
+a section:
+```typescript
+// frontend/scripts/components/sections/index.ts
+import './mb-my-section';
 ```
+
+If the tag is defined and the section still misbehaves after a settings change,
+the element is holding state across reconnects. `disconnectedCallback()` must
+reset `isInitialized` and abort the controller.
 
 ---
 
@@ -1022,7 +1051,7 @@ useSectionLifecycle('section-type', {
 - [Vite Documentation](https://vitejs.dev/)
 - [vite-plugin-shopify Documentation](https://github.com/barrel/shopify-vite)
 - [Shopify Theme Development](https://shopify.dev/docs/themes)
-- [Bun Documentation](https://bun.sh/docs)
+- [Custom Elements — MDN](https://developer.mozilla.org/docs/Web/API/Web_components/Using_custom_elements)
 - [Shopify CLI Documentation](https://shopify.dev/docs/themes/tools/cli)
 
 ---
@@ -1044,7 +1073,7 @@ Last Updated: October 2025
 This Shopify development environment provides:
 
 ✅ **Security**: Comprehensive .gitignore, environment variable protection, no PII exposure
-✅ **Performance**: Vite HMR (<50ms), Bun package management (3-10x faster), optimized builds
+✅ **Performance**: Vite HMR (<50ms), Yarn 4 immutable installs, optimized builds
 ✅ **Developer Experience**: Hot reload, type-safe imports, structured architecture
 ✅ **AI-Friendly**: Clear guidelines for coding agents, consistent conventions
 ✅ **Production-Ready**: CI/CD pipeline, automated testing, deployment scripts
@@ -1052,6 +1081,6 @@ This Shopify development environment provides:
 
 **Start developing**:
 ```bash
-bun setup.ts  # Automated setup
-bun run dev   # Start development
+bun setup.ts  # Automated setup — the scaffolder itself runs on Bun
+yarn dev      # Start development
 ```

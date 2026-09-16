@@ -159,35 +159,33 @@ class FocusTrap {
 </div>
 ```
 
-```javascript
-// Modal JavaScript
-class Modal extends BaseComponent {
-  _previousActiveElement = null;
-  _focusTrap = null;
+```typescript
+export class MbModal extends HTMLElement {
+  private previousActiveElement: HTMLElement | null = null;
+  private focusTrap: FocusTrap | null = null;
 
-  open() {
-    this._previousActiveElement = document.activeElement;
-    this.element.hidden = false;
-    this.element.setAttribute('aria-hidden', 'false');
+  open(): void {
+    this.previousActiveElement = document.activeElement as HTMLElement | null;
+    this.hidden = false;
+    this.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
 
-    this._focusTrap = new FocusTrap(this.element);
-    this._focusTrap.activate();
+    this.focusTrap = new FocusTrap(this);
+    this.focusTrap.activate();
 
-    // Announce to screen readers
-    this._announceToScreenReader('Modal opened');
+    this.announceToScreenReader('Modal opened');
   }
 
-  close() {
-    this.element.hidden = true;
-    this.element.setAttribute('aria-hidden', 'true');
+  close(): void {
+    this.hidden = true;
+    this.setAttribute('aria-hidden', 'true');
     document.body.style.overflow = '';
 
-    this._focusTrap?.deactivate();
-    this._previousActiveElement?.focus();
+    this.focusTrap?.deactivate();
+    this.previousActiveElement?.focus();
   }
 
-  _announceToScreenReader(message) {
+  private announceToScreenReader(message: string): void {
     const _announcement = document.createElement('div');
     _announcement.setAttribute('role', 'status');
     _announcement.setAttribute('aria-live', 'polite');

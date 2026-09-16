@@ -1,6 +1,6 @@
 ---
 name: code-writer
-description: Shopify theme code implementation specialist. Use for writing JavaScript/TypeScript components, Liquid templates, and implementing features. Enforces project patterns including BaseComponent, section lifecycles, and the 500-line soft limit for files.
+description: Shopify theme code implementation specialist. Use for writing TypeScript components, Liquid templates, and implementing features. Enforces project patterns including custom-element sections, one AbortController per element, and the 500-line soft limit for files.
 tools: Read, Write, Glob, Grep, Edit, Bash
 model: sonnet
 ---
@@ -35,13 +35,13 @@ You are an expert Shopify theme developer responsible for implementing JavaScrip
 
 ```
 BEFORE (single 600+ line file):
-frontend/scripts/components/productPage.js
+frontend/scripts/components/sections/mb-product-page.ts
 
 AFTER (logical split):
-frontend/scripts/components/productPage.js (main orchestration)
-frontend/scripts/components/productGallery.js (image handling)
-frontend/scripts/components/productVariants.js (variant selection)
-frontend/scripts/hooks/useProductData.js (data fetching)
+frontend/scripts/components/sections/mb-product-page.ts (element + orchestration)
+frontend/scripts/components/sections/mb-product-page.types.ts (config and local types)
+frontend/scripts/components/shared/productGallery.ts (image handling, dynamic import)
+frontend/scripts/components/shared/productVariants.ts (variant selection)
 ```
 
 ## Project Architecture
@@ -50,110 +50,117 @@ frontend/scripts/hooks/useProductData.js (data fetching)
 ```
 frontend/
 ├── entrypoints/
-│   └── storefront.js           # Main entry point
+│   ├── storefront.ts           # Defines tags; nothing else
+│   └── custom_styling.scss
 ├── scripts/
+│   ├── core/
+│   │   └── global.ts           # window.<global>, runs before any upgrade
 │   ├── components/
-│   │   ├── baseComponent.js    # Base class for all components
-│   │   └── sections/           # Section-specific components
-│   ├── hooks/
-│   │   ├── core/
-│   │   │   └── sectionRegistry.js
-│   │   ├── useSectionLifecycle.js
-│   │   └── useDebounce.js
-│   └── utils.js                # Shared utilities
-└── styles/                     # CSS/SCSS files
+│   │   ├── sections/           # One custom element per section
+│   │   │   ├── index.ts        # Barrel — importing a module registers its tag
+│   │   │   ├── mb-carousel.ts
+│   │   │   └── mb-carousel.types.ts
+│   │   └── shared/             # Reusable pieces, often dynamically imported
+│   ├── types/                  # Cross-section types + Window augmentation
+│   ├── constants/
+│   └── utils/                  # consoleMessage, defineElement, whenVisible, …
+└── styles/
+    ├── sections/
+    └── components/
 ```
 
 ## Component Patterns
 
-### BaseComponent Extension
+### The tag is the initiator
 
-All section components MUST extend `BaseComponent`:
+A section is a custom element. There is no registry, no boot loop, and no
+`data-section-type`. The browser upgrades the tag and calls `connectedCallback()`;
+the theme editor's re-render gives you load and unload for free.
 
-```javascript
-import { BaseComponent } from '~/scripts/components/baseComponent';
+```typescript
+import { consoleMessage, defineElement, parseElementConfig } from '@/utils';
+import type { MbProductCardConfig } from './mb-product-card.types';
 
-export class ProductCard extends BaseComponent {
-  // REQUIRED: Define component name (minifier mangles constructor.name)
-  protected readonly componentName = 'ProductCard';
+const DEFAULT_CONFIG: MbProductCardConfig = {
+  animation_duration: 300,
+  enable_hover: true,
+};
 
-  constructor(selector, root = document) {
-    super(selector, root);
+export class MbProductCard extends HTMLElement {
+  private controller: AbortController | null = null;
+  private config: MbProductCardConfig = DEFAULT_CONFIG;
+  private addToCart: HTMLElement | null = null;
+  private isInitialized = false;
+
+  connectedCallback(): void {
+    if (this.isInitialized) return;
+
+    this.addToCart = this.querySelector('.mb-product-card__add-to-cart');
+
+    if (!this.addToCart) {
+      consoleMessage('MbProductCard: missing add-to-cart', 'warn');
+      return;
+    }
+
+    this.config = parseElementConfig(this, DEFAULT_CONFIG);
+    this.controller = new AbortController();
+
+    this.addToCart.addEventListener('click', this.handleAddToCart, {
+      signal: this.controller.signal,
+    });
+
+    this.isInitialized = true;
   }
 
-  // REQUIRED: Return default configuration
-  getDefaultConfig() {
-    return {
-      animationDuration: 300,
-      enableHover: true,
-    };
+  disconnectedCallback(): void {
+    this.controller?.abort();
+    this.controller = null;
+    this.addToCart = null;
+    this.isInitialized = false;
   }
 
-  // REQUIRED: Initialize component logic
-  init() {
-    this.cacheElements();
-    this.bindEvents();
-    this.log('Component initialized');
-  }
-
-  // REQUIRED: Cleanup on destroy
-  destroy() {
-    this.unbindEvents();
-    super.destroy();
-  }
-
-  // Cache DOM elements
-  cacheElements() {
-    this._image = this.element.querySelector('.product-card__image');
-    this._title = this.element.querySelector('.product-card__title');
-    this._addToCart = this.element.querySelector('.product-card__add-to-cart');
-  }
-
-  // Bind event listeners
-  bindEvents() {
-    this._addToCart?.addEventListener('click', this._handleAddToCart);
-  }
-
-  // Unbind event listeners
-  unbindEvents() {
-    this._addToCart?.removeEventListener('click', this._handleAddToCart);
-  }
-
-  // Event handler (arrow function for correct `this` binding)
-  _handleAddToCart = (event) => {
+  private handleAddToCart = (event: Event): void => {
     event.preventDefault();
-    // Implementation
   };
 }
+
+defineElement('mb-product-card', MbProductCard);
 ```
 
-### Section Lifecycle
+Register it by adding `import './mb-product-card';` to
+`frontend/scripts/components/sections/index.ts`. That barrel import is the only
+thing that puts a tag on the page.
 
-Use `useSectionLifecycle` for Shopify theme editor compatibility:
+### Non-negotiables
 
-```javascript
-import { useSectionLifecycle } from '~/scripts/hooks/useSectionLifecycle';
-import { ProductCard } from '~/scripts/components/productCard';
+- One `AbortController` per element, aborted in `disconnectedCallback()`. Never
+  pair `addEventListener` with a hand-written `removeEventListener`.
+- Handlers are arrow-function class fields. `.bind(this)` at the call site
+  creates a reference that can never be removed.
+- `isInitialized` guards double init and is reset on disconnect —
+  `disconnectedCallback()` also fires on a DOM move, not just removal.
+- The config type lives in the `.types.ts` companion, never in the component file.
+- Custom elements are `display: inline` by default; the SCSS partial must set one.
 
-useSectionLifecycle('featured-collection', {
-  onLoad: (root) => {
-    const _cards = new ProductCard('.product-card', root);
-    return { cards: _cards };
-  },
+### Theme editor
 
-  onUnload: (root, instance) => {
-    instance.cards?.destroy();
-  },
+Section load and unload need no code. Block select and deselect are the
+exception — they fire without a re-render, and bubble from the block up through
+the section root, so the element listens on itself:
 
-  onBlockSelect: (root, block) => {
-    // Handle block selection in theme editor
-  },
-
-  onBlockDeselect: (root, block) => {
-    // Handle block deselection
-  }
-});
+```typescript
+this.addEventListener('shopify:block:select', this.handleBlockSelect, { signal });
 ```
+
+### Performance
+
+- Heavy dependencies go behind `await import('@/components/shared/…')` inside
+  `connectedCallback()`. That is also the code-splitting boundary, so only pages
+  carrying the tag pay for the chunk.
+- Below-the-fold work goes behind `whenVisible(this, fn)`; call the teardown it
+  returns from `disconnectedCallback()`.
+- Cache element references on init. Never `querySelector` inside a handler —
+  delegate from the root and use `closest()`.
 
 ## Naming Conventions
 
@@ -203,26 +210,25 @@ async fetchProduct(handle) {
   assign _products_to_show = section.settings.products_to_show | default: 4
 -%}
 
-<section
-  id="section-{{ _section_id }}"
-  class="featured-collection"
+<mb-featured-collection
+  class="mb-featured-collection"
   data-section-id="{{ _section_id }}"
-  data-section-type="featured-collection"
+  data-config="{{ section.settings | json | escape }}"
 >
-  <div class="featured-collection__container page-width">
+  <div class="mb-featured-collection__container page-width">
     {%- if section.settings.title != blank -%}
-      <h2 class="featured-collection__title">
+      <h2 class="mb-featured-collection__title">
         {{ section.settings.title | escape }}
       </h2>
     {%- endif -%}
 
-    <div class="featured-collection__grid">
+    <div class="mb-featured-collection__grid">
       {%- for product in _collection.products limit: _products_to_show -%}
-        {% render 'product-card', product: product %}
+        {% render 'mb-product-card', product: product %}
       {%- endfor -%}
     </div>
   </div>
-</section>
+</mb-featured-collection>
 
 {% schema %}
 {
@@ -647,13 +653,14 @@ export default CartAPI;
 ## Code Quality Checklist
 
 Before completing any implementation:
-- [ ] Component extends BaseComponent (if applicable)
-- [ ] Section lifecycle hooks implemented for theme editor
+- [ ] Section is a custom element registered with `defineElement()`
+- [ ] Module imported in `components/sections/index.ts`
+- [ ] Config type in the `.types.ts` companion
+- [ ] Everything released in `disconnectedCallback()` via one `AbortController`
 - [ ] Error handling with try/catch for async operations
-- [ ] Event listeners cleaned up in destroy()
 - [ ] File under 500 lines (or justified if over)
 - [ ] Proper naming conventions followed
-- [ ] No console.log (use `this.log()` or `consoleMessage()`)
+- [ ] No console.log (use `consoleMessage()`)
 - [ ] Mobile-first considerations in any CSS touched
 
 ## Collaboration

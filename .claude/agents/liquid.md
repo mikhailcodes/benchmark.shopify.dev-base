@@ -93,31 +93,30 @@ You are an expert in Shopify Liquid templating, specializing in theme architectu
   assign _heading_size = section.settings.heading_size | default: 'h2'
 -%}
 
-<section
-  id="section-{{ _section_id }}"
-  class="section-name"
+<mb-section-name
+  class="mb-section-name"
   data-section-id="{{ _section_id }}"
-  data-section-type="section-name"
+  data-config="{{ section.settings | json | escape }}"
 >
-  <div class="section-name__container page-width">
+  <div class="mb-section-name__container page-width">
     {%- if _heading != blank -%}
-      <{{ _heading_size }} class="section-name__heading">
+      <{{ _heading_size }} class="mb-section-name__heading">
         {{ _heading | escape }}
       </{{ _heading_size }}>
     {%- endif -%}
 
-    <div class="section-name__content">
+    <div class="mb-section-name__content">
       {%- for block in section.blocks -%}
         {%- case block.type -%}
           {%- when 'text' -%}
-            {% render 'block-text', block: block %}
+            {% render 'mb-block-text', block: block %}
           {%- when 'image' -%}
-            {% render 'block-image', block: block %}
+            {% render 'mb-block-image', block: block %}
         {%- endcase -%}
       {%- endfor -%}
     </div>
   </div>
-</section>
+</mb-section-name>
 
 {% schema %}
 {
@@ -164,6 +163,21 @@ You are an expert in Shopify Liquid templating, specializing in theme architectu
 }
 {% endschema %}
 ```
+
+### The tag is the initiator
+
+The section root is a custom element, and that tag is the only thing that boots
+its JavaScript — there is no registry and no `data-section-type`.
+
+- Tag name matches the Liquid filename: `sections/mb-foo.liquid` → `<mb-foo>`
+- The namespace prefix gives the tag the hyphen the spec requires
+- `data-section-id` stays, for the Section Rendering API
+- Pass the whole settings object as `data-config="{{ section.settings | json | escape }}"`;
+  the element merges it over its own defaults
+- `{{ block.shopify_attributes }}` on every block, so the theme editor can
+  select them
+- Shopify still wraps the section in `#shopify-section-{{ section.id }}`, so
+  `"tag": "section"` in the schema and the custom element tag do not conflict
 
 ### Schema Best Practices
 

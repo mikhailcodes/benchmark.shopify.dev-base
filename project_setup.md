@@ -416,79 +416,142 @@ id later resurrects the old value, which is a genuinely confusing bug to chase.
 
 ## Architecture
 
-### Two-step component construction
+### The tag is the initiator
 
-A subclass's field initialisers do not run until after `super()` returns. If the
-base constructor calls `init()`, every subclass field is `undefined` inside it.
-This is not theoretical — it shipped in an earlier version of this template and
-crashed the first component built on it.
+Every custom section is a custom element. The tag in the Liquid markup boots the
+behaviour — there is no registry, no boot loop, no `querySelectorAll` pass, and no
+`data-section-type`. The browser upgrades the element and calls
+`connectedCallback()`.
 
-So the constructor only stores arguments, and `mount()` resolves config and runs
-`init()`:
+This replaced an earlier `BaseComponent` + `useSectionLifecycle` registry. Three
+classes of bug went with it:
+
+- **Two-step construction.** A subclass's field initialisers do not run until
+  after `super()` returns, so a base constructor that called `init()` saw every
+  subclass field as `undefined`. That shipped once and crashed the first
+  component built on it. A custom element has no such split: the browser
+  constructs, then calls `connectedCallback()`.
+- **`this.constructor.name`.** The minifier mangles it, so every component had to
+  redeclare its own name. A tag name is a string literal in `defineElement()`.
+- **Registry drift.** Tag name, `data-section-type`, and the `registerSection()`
+  key all had to agree. Now there is one name.
 
 ```typescript
-export abstract class BaseComponent<TConfig extends BaseConfig = BaseConfig> {
-  /** The minifier mangles this.constructor.name, so subclasses declare their own. */
-  protected abstract readonly componentName: string;
+import { consoleMessage, defineElement, parseElementConfig } from '@/utils';
+import type { <Prefix>CartDrawerConfig } from './<prefix>-cart-drawer.types';
 
-  protected readonly container: HTMLElement;
-  protected config!: TConfig;
-  private readonly overrides?: Partial<TConfig>;
+const DEFAULT_CONFIG: <Prefix>CartDrawerConfig = { close_on_escape: true };
 
-  constructor(container: HTMLElement, config?: Partial<TConfig>) {
-    this.container = container;
-    this.overrides = config;
+export class <Prefix>CartDrawer extends HTMLElement {
+  private controller: AbortController | null = null;
+  private config: <Prefix>CartDrawerConfig = DEFAULT_CONFIG;
+  private isInitialized = false;
+
+  connectedCallback(): void {
+    if (this.isInitialized) return;
+
+    this.config = parseElementConfig(this, DEFAULT_CONFIG);
+    this.controller = new AbortController();
+
+    this.addEventListener('click', this.handleClick, { signal: this.controller.signal });
+
+    this.isInitialized = true;
   }
 
-  public mount(): this {
-    if (this.mounted || this.destroyed) return this;
-    this.config = { ...this.getDefaultConfig(), ...this.overrides };
-    this.mounted = true;
-    this.init();
-    return this;
+  disconnectedCallback(): void {
+    this.controller?.abort();
+    this.controller = null;
+    this.isInitialized = false;
   }
+
+  private handleClick = (event: Event): void => {
+    const _toggle = (event.target as HTMLElement | null)?.closest('[data-cart-toggle]');
+    if (!_toggle) return;
+
+    this.classList.toggle('is-open');
+  };
 }
+
+defineElement('<prefix>-cart-drawer', <Prefix>CartDrawer);
 ```
 
-Always register via the `mountComponent()` helper so the second step cannot be
-forgotten:
+One `AbortController` owns every listener, so `disconnectedCallback()` releases
+them all at once and cannot drift out of sync with the bind sites.
+
+### One section, four files
+
+| File | Purpose |
+|------|---------|
+| `sections/<prefix>-carousel.liquid` | Markup, with the tag as the root element |
+| `frontend/scripts/components/sections/<prefix>-carousel.ts` | Behaviour + `defineElement()` |
+| `frontend/scripts/components/sections/<prefix>-carousel.types.ts` | Config type |
+| `frontend/styles/sections/_<prefix>-carousel.scss` | Styles |
+
+Registration is one line in `frontend/scripts/components/sections/index.ts`:
 
 ```typescript
-useSectionLifecycle('cart-drawer', {
-  mount: 'visible',
-  onLoad: mountComponent(CartDrawer),
-  onUnload: (_root, instance) => (instance as CartDrawer)?.destroy(),
-});
+import './<prefix>-carousel';
 ```
 
-`getDefaultConfig()` must return literals — it runs before `init()` and cannot
-read instance fields.
+That barrel is imported by the entrypoint, and forgetting it is the only way a
+section fails to mount. The namespace prefix gives the tag its required hyphen
+for free.
+
+### Import order in the entrypoint is load-bearing
+
+```typescript
+import 'vite/modulepreload-polyfill';
+import '@/core/global';
+import '@/components/sections';
+```
+
+ES modules evaluate dependencies in declaration order, and an element upgrades the
+moment it is defined. The global object has to exist before that first upgrade, or
+logging is silent and `dispatchStoreEvent()` throws during init.
 
 ### Mount strategies
 
-| Strategy | Runs | Use for |
-|---|---|---|
-| `eager` (default) | during registration | above-the-fold content |
-| `idle` | `requestIdleCallback` | analytics, prefetch |
-| `visible` | `IntersectionObserver` | everything below the fold |
+The element lifecycle covers eager mounting. Anything heavier is deferred inside
+`connectedCallback()`:
 
-Pending `idle`/`visible` mounts must be cancelled on unload, or the theme editor
-fires a callback at a detached root.
+| Strategy | How | Use for |
+|---|---|---|
+| Eager | plain `connectedCallback()` | above-the-fold content |
+| Visible | `whenVisible(this, fn)` — `IntersectionObserver` | everything below the fold |
+| Lazy chunk | `await import('@/components/shared/…')` | anything with a real dependency |
+
+A dynamic import is also the code-splitting boundary: the chunk is fetched only by
+pages carrying the tag. `whenVisible()` returns a teardown that
+`disconnectedCallback()` must call — an observer left running outlives the element.
+
+### Theme editor
+
+Section load and unload need no code at all. A settings change re-renders the
+section HTML, which destroys the old element and constructs a new one; markup
+fetched through the Section Rendering API boots identically.
+
+Block select and deselect are the exception, because they fire without
+re-rendering anything. They bubble from the block up through the section root, so
+the element listens on itself:
+
+```typescript
+this.addEventListener('shopify:block:select', this.handleBlockSelect, { signal });
+```
 
 ### Wiring a section in Liquid
 
-Horizon has no `data-section-type` convention — Shopify only wraps sections in
-`#shopify-section-{{ section.id }}`. A `<prefix>-section-attrs` snippet emits what
-the registry binds to:
-
 ```liquid
-<div {% render '<prefix>-section-attrs', type: 'cart-drawer', id: section.id %}>
+<<prefix>-carousel
+  class="<prefix>-carousel"
+  data-section-id="{{ section.id }}"
+  data-config="{{ section.settings | json | escape }}"
+>
 ```
 
-`id` must be passed explicitly. `{% render %}` creates an isolated scope, so
-`section` is not visible inside the snippet — omit it and `data-section-id` renders
-empty, which makes every instance of that type collide on one registry key. The
-registry should also fall back to a per-element identity for any falsy id.
+`data-config` carries the whole settings object and `parseElementConfig()` merges
+it over the defaults, warning on malformed JSON. `data-section-id` stays for the
+Section Rendering API. No snippet, no scope juggling, no registry key to collide
+on.
 
 ### Diagnostics
 
@@ -497,14 +560,15 @@ check for **which bundle is actually running** — `import.meta.env.DEV` is true
 in the Vite-served build, so it cannot be fooled by a stale asset:
 
 ```js
-STOREFRONT.debug.info()        // source: 'local vite dev server' | 'compiled theme asset'
-STOREFRONT.debug.sections()    // registered types, found vs mounted
-STOREFRONT.debug.vitals()      // Core Web Vitals so far
-STOREFRONT.debug.devMode(true) // enable logging, persisted
+<global>.debug.info()        // source: 'local vite dev server' | 'compiled theme asset'
+<global>.debug.elements()    // defined tags, and how many of each are on the page
+<global>.debug.vitals()      // Core Web Vitals so far
+<global>.debug.devMode(true) // enable logging, persisted
 ```
 
-`found` vs `mounted` is the single most useful diagnostic: a section that renders
-but never mounts is otherwise invisible.
+Defined-but-absent and present-but-not-upgraded are the two states worth
+surfacing. `document.querySelectorAll(tag).length` against
+`customElements.get(tag)` tells you both.
 
 **Error-level logs must never be gated behind a debug flag.** A swallowed
 initialisation error is exactly the one you need to see.
@@ -517,7 +581,9 @@ displays every shared snippet against the theme's live CSS custom properties.
 It is built from the same snippets production uses, so it doubles as the upgrade
 smoke test. Add a shared snippet, add it to the styleguide.
 
----
+Horizon has no `data-section-type` convention — Shopify only wraps sections in
+`#shopify-section-{{ section.id }}`. A `<prefix>-section-attrs` snippet emits what
+the registry binds to:
 
 ## Gotchas that have actually bitten us
 
@@ -537,9 +603,10 @@ smoke test. Add a shared snippet, add it to the styleguide.
 7. **A stray `package.json` in `$HOME`** makes Yarn 4 treat any repo beneath it as
    a nested workspace and refuse to install. An empty `yarn.lock` in the project
    resolves it.
-8. **Build unminified** (`minify: false`, `cssMinify: false`) so compiled assets
-   stay readable and patchable in the Shopify editor. Costs ~2-3x raw bytes; the
-   CDN still serves gzip.
+8. **Minification is on by default**, which is the right call now that nothing
+   depends on `this.constructor.name`. If you turn it off to keep assets
+   patchable in the Shopify editor, expect ~2-3x raw bytes — the CDN still
+   serves gzip either way.
 
 ---
 
@@ -555,7 +622,7 @@ smoke test. Add a shared snippet, add it to the styleguide.
 - [ ] `yarn type-check && yarn lint && yarn build` pass
 - [ ] `shopify theme check` baseline offence count recorded
 - [ ] Styleguide page renders every shared snippet
-- [ ] `STOREFRONT.debug.sections()` shows `found === mounted`
+- [ ] Every section tag is defined, and upgrades on the page that renders it
 - [ ] CI green, and its asset commit lands on the branch
 
 ---
