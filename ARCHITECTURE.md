@@ -1,8 +1,11 @@
 # Frontend architecture
 
+> Examples use `tm-` as the tag prefix and neutral token names.
+> Substitute your project's prefix and design-system roles.
+
 How custom code is organised in a Benchmark Shopify theme, and why. The rules
 below are portable: nothing here is specific to one storefront, and the tag
-prefix (`mb-` in Morrow) is the only per-project value.
+prefix is the only per-project value.
 
 Last revised 2026-09-17.
 
@@ -27,8 +30,8 @@ so "overwrite everything unprefixed" is a safe upgrade.
 ## 2. Layout
 
 ```
-sections/mb-<name>.liquid         markup — theme root, prefixed, owned by Shopify's layout
-snippets/mb-<name>.liquid         reusable markup
+sections/tm-<name>.liquid         markup — theme root, prefixed, owned by Shopify's layout
+snippets/tm-<name>.liquid         reusable markup
 
 frontend/
   entrypoints/
@@ -39,7 +42,7 @@ frontend/
       index.ts                    side-effect imports for tag-registering elements
       tabs/
         index.ts                  export * from './tabs'
-        tabs.ts                   class Tabs + defineElement('mb-tabs', Tabs)
+        tabs.ts                   class Tabs + defineElement('tm-tabs', Tabs)
         tabs.types.ts
         _tabs.scss                only if the element ships styling
       carousel/                   plain module — dynamically imported, not in the barrel
@@ -47,7 +50,7 @@ frontend/
       index.ts                    side-effect imports for every section
       header/
         index.ts
-        header.ts                 class Header + defineElement('mb-header', Header)
+        header.ts                 class Header + defineElement('tm-header', Header)
         header.types.ts
         _header.scss
     core/                         global bootstrap (window.<namespace>)
@@ -97,8 +100,8 @@ every page, which is exactly what the dynamic import exists to prevent.
 
 | Thing | Form | Example |
 |-------|------|---------|
-| Tag | prefixed, hyphenated | `mb-header` |
-| Liquid | prefixed, theme root | `sections/mb-header.liquid` |
+| Tag | prefixed, hyphenated | `tm-header` |
+| Liquid | prefixed, theme root | `sections/tm-header.liquid` |
 | Folder | unprefixed | `modules/sections/header/` |
 | Module | unprefixed, matches folder | `header.ts` |
 | Class | PascalCase, unprefixed | `Header` |
@@ -166,7 +169,7 @@ The tiers are load-bearing; order *within* the section block is not.
 
 ## 7. Adding a new section
 
-1. `sections/mb-<name>.liquid` — markup, `<mb-<name>>` as the root, schema
+1. `sections/tm-<name>.liquid` — markup, `<tm-<name>>` as the root, schema
 2. `frontend/modules/sections/<name>/<name>.ts` — class, `defineElement()` last
 3. `<name>.types.ts` — config type, keys mirroring the schema setting ids
 4. `_<name>.scss` — mobile-first, tokens only
@@ -186,7 +189,7 @@ If the behaviour already exists as an element, steps 2, 3 and 5 disappear.
 Mechanical, and worth doing in one commit so nothing renders half-migrated.
 
 1. `frontend/scripts` → `frontend/modules`
-2. `modules/components/sections/mb-<n>.*` → `modules/sections/<n>/<n>.*`
+2. `modules/components/sections/tm-<n>.*` → `modules/sections/<n>/<n>.*`
 3. `modules/components/shared/*` → `modules/elements/<n>/`
 4. Section partials from `styles/sections/` and `styles/components/` into their
    module folders; primitives stay behind, prefix dropped
