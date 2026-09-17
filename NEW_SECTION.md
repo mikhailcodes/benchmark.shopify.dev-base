@@ -74,10 +74,10 @@ order of preference:
 
 What you must not do is approximate silently — and the bar for option 2 is that
 **no existing step can do the job**, not that Figma reports a different number.
-The benefit row added `section-title` (nothing sat between `h1` at 44 and
-`numeral` at 56) and `feature-title` (no ui step at 20 existed at all). A third
-candidate, a 16 / 24 caption, was rejected: it differed from `body` by
-line-height alone, so it used `body`.
+Across six sections exactly one token was added: `feature-title`, because no ui
+step at 20px exists in any weight above 400. Two candidates were rejected — a
+band-heading step (within 4px of `h1`, see below) and a 16/24 caption (differs
+from `body` by line-height alone).
 
 Check the frames against each other before adding anything. Two sections drawing
 the same role at 48 Bold and 46.1 Regular is a Figma inconsistency to raise, not
@@ -153,8 +153,7 @@ replaces it. Check it before taking a colour from a frame.
 
 A real example: a 13px accent label measured 4.07:1 on its tinted ground, below
 the 4.5:1 floor, so it renders in a darkened derivative at 5.83:1 instead.
-Reproducing a contrast failure faithfully is still a contrast failure — record
-the substitution rather than silently matching Figma.
+Reproducing a contrast failure faithfully is still a contrast failure.
 
 ---
 
@@ -286,70 +285,52 @@ import drags it back into the main bundle and undoes the split.
 
 ## 5. Animation
 
-**The default is CSS. No animation library ships to the browser.**
+**Entrance and sequenced motion run on [Motion](https://motion.dev).** It is
+~5KB, has no dependencies, ships its own types, and is loaded on demand so only
+a page carrying the tag downloads it. CSS transitions still handle state changes
+— hover, focus, open/closed — because those are one property reacting to one
+event, not a keyframed sequence.
 
-Transitions and keyframes run on the compositor; a JavaScript library runs on the
-main thread and competes with everything else on the page. The budget for a
-theme this size does not have room for the second thing.
-
-### The three tiers
-
-| Tier | Use | Cost |
-|------|-----|------|
-| CSS transition + keyframes | ~95% of section work | 0 KB |
-| Web Animations API (`element.animate()`) | sequencing that CSS cannot express | 0 KB, native |
-| A library (Motion One, ~4 KB) | spring physics, FLIP, scroll-linked timelines | dynamic import only |
-
-Reach for tier 3 only when tiers 1 and 2 have actually failed, and load it the
-same way as any other heavy dependency — `await import()` inside
-`connectedCallback()`, never in the entry bundle.
+| Use | Tool |
+|-----|------|
+| Entrance, stagger, scroll-triggered sequences | Motion, dynamically imported |
+| Hover, focus, a panel opening | CSS transition |
+| Height of unknown content | CSS `grid-template-rows: 0fr → 1fr` |
 
 ### Entrance animations use `<tm-reveal>`
 
-Do not hand-roll an IntersectionObserver per section. The shared element takes over a
-group, hands the cascade an index per item, and the CSS does the rest:
-
 ```liquid
-<tm-reveal class="tm-benefit-row__items" data-config="{{ section.settings | json | escape }}">
-  <div class="tm-benefit-row__item" data-reveal-item>…</div>
+<tm-reveal class="…" data-config="{{ section.settings | json | escape }}">
+  <div class="…__item" data-reveal-item>…</div>
 </tm-reveal>
 ```
 
-```scss
-.tm-reveal.is-loaded > * {
-  opacity: 0;
-  transform: translate3d(0, u.rem(16), 0);
-  transition:
-    opacity u.transition('slow') u.easing('out'),
-    transform u.transition('slow') u.easing('out');
-  transition-delay: calc(var(--tm-reveal-index, 0) * var(--tm-reveal-stagger, 0ms));
-}
-```
+The element loads Motion, applies the hidden state, and animates it away when
+`inView` fires.
 
-Why it is shaped this way:
-
-- **`is-loaded` is set by script, never by Liquid.** The hidden state only exists
-  once JavaScript is present, so no-JS and failed-chunk both render the content
-  normally. Hiding content in CSS and revealing it in JS is how sections end up
-  permanently invisible.
-- **The stagger is a custom property**, so delay is cascade arithmetic rather
-  than a timer per item.
-- **`will-change` is dropped after landing.** A permanent hint costs a
-  compositor layer per item for an animation that runs once.
+**Nothing is hidden in CSS, and this is the whole point.** A reveal that sets
+`opacity: 0` in a stylesheet and waits for a class will strand the section at
+zero opacity whenever the trigger never runs — a blocked bundle, a failed chunk,
+a headless renderer, a background tab where transitions are throttled. Because
+the hidden state here is applied by the same code that removes it, any failure
+path leaves the content rendered. That is a structural guarantee; a timeout
+racing an observer is not.
 
 ### Rules
 
-- Animate `transform` and `opacity`. Nothing else. `width`, `height`, `top` and
-  `left` trigger layout on every frame.
-- Honour `prefers-reduced-motion: reduce` — final state, no transition. The
-  reveal element skips observing entirely in that case.
-- Durations and easings come from tokens: `u.transition('base')`,
-  `u.easing('out')`. The spring curve is `cubic-bezier(0.34, 1.56, 0.64, 1)`.
+- Animate `transform` and `opacity`. `width`, `height`, `top` and `left` trigger
+  layout on every frame — the exception is a deliberate expand, where the layout
+  change *is* the animation.
+- Ease out with an exponential curve. `ANIMATION.EASE_OUT_QUART` is the default.
+  No bounce, no elastic.
+- Honour `prefers-reduced-motion: reduce` — the reveal element skips loading
+  Motion entirely in that case, so reduced-motion visitors pay nothing.
 - Stagger ~80ms. Long enough to read as a sequence, short enough that the last
   item is not still waiting when the group has been read.
-- Never animate an element into view that the user has already scrolled past.
-
----
+- **Do not apply the same entrance to every section.** One identical fade-and-rise
+  on every band is the tell. Give sections that are carried by their imagery no
+  entrance at all; `tm-media-columns` exposes an `animate` setting for exactly
+  this reason.
 
 ## 6. Writing the CSS
 
