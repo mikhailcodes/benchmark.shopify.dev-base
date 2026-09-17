@@ -2,6 +2,13 @@
 
 ## Project Overview
 
+> **Frontend layout:** [ARCHITECTURE.md](ARCHITECTURE.md) defines the module
+> structure generated projects should use — one folder per section, `elements/`
+> for shared behaviour, unprefixed filenames, side-effect barrels.
+> **`setup.ts` still scaffolds the older `frontend/scripts/components/` layout**,
+> so a freshly generated project will not match this doc until the generator is
+> updated (see ARCHITECTURE.md §8 for the move).
+
 This is a **Shopify theme development environment** using Vite + Yarn 4 with TypeScript and SCSS. The project structure separates source code from compiled assets to maintain clean development workflows.
 
 ### Critical Project Rules
