@@ -36,6 +36,23 @@ yarn push            # shopify theme push (development environment — the LIVE 
 yarn deploy          # build, then push
 ```
 
+### Ports
+
+`yarn dev` starts two servers: the Shopify CLI preview on **9292** and Vite on
+**5173**. Both read an environment variable, so another theme project can hold
+the defaults:
+
+```bash
+SHOPIFY_PORT=9293 VITE_PORT=5174 yarn dev
+```
+
+Vite's port needs no other change — the CORS allowlist in `vite.config.js` covers
+any `127.0.0.1` port, and vite-plugin-shopify rewrites `snippets/vite-tag.liquid`
+to whichever port it binds.
+
+Passing `--port` to `yarn dev` itself does not work: `run-p` forwards trailing
+args to *both* children, so the CLI and Vite fight over one port.
+
 `yarn push` and `yarn deploy` write to the live theme. Never run either without
 an explicit instruction.
 

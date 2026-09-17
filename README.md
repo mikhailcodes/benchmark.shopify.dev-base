@@ -313,7 +313,7 @@ The setup supports multiple Shopify environments:
   "scripts": {
     "dev": "run-s -s \"clean\" \"dev:serve\" --",
     "dev:serve": "run-p -sr \"shopify:dev\" \"vite:dev\" --",
-    "shopify:dev": "shopify theme dev --environment development --live-reload=hot-reload"
+    "shopify:dev": "shopify theme dev --environment development --live-reload=hot-reload --port=${SHOPIFY_PORT:-9292}"
   }
 }
 ```
