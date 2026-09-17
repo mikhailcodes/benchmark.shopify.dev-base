@@ -83,6 +83,69 @@ Check the frames against each other before adding anything. Two sections drawing
 the same role at 48 Bold and 46.1 Regular is a Figma inconsistency to raise, not
 two tokens to create.
 
+### Before building: is this one section or two?
+
+Frames that look different are often one section with different fields filled
+in. Check before writing anything, because merging two frames after the fact
+means rewriting both.
+
+**Put them side by side and diff the container**, not the contents:
+
+| | A `581:36288` | B `581:36421` |
+|---|---|---|
+| Intro | none | heading + description |
+| Columns | 2 | 2 |
+| Image | 650×650 — 1:1 | 643×822 — 4:5 |
+| Radius | 30px | 10px |
+| Gap | 20px | 35px |
+| Padding | px 60 / py 40 | px 60 / py 40 |
+| Card body | none | eyebrow · title · body · rule · stats |
+
+Same container, same columns, same padding. A **is** B with the intro and card
+bodies empty. One section, two presets.
+
+The reading to internalise: **an empty field is a layout variant.** Guard every
+optional field with `!= blank` and a frame with no heading is not a different
+section, it is the same section with no heading. That is also why defaults
+matter — a preset per frame gives merchants both looks without a second file.
+
+What the diff *does* tell you is which values must become settings. Here, three
+properties differed — ratio, radius, gap — so all three are settings rather than
+hardcoded values. Anything identical across frames stays in the stylesheet.
+
+A caution: only merge when the **container** matches. Two frames that share a
+card style but differ in layout (a grid versus a carousel) are two sections that
+should share a snippet, not one section with a mode switch.
+
+### Reusing type steps: the 4px rule
+
+Reuse the nearest existing step when it is **within 4px**. Add a token only
+past that, or when size is close but the step is wrong in a way that breaks
+hierarchy.
+
+Worked example, from the two frames above:
+
+| Figma | Nearest step | Verdict |
+|-------|--------------|---------|
+| Heading 50 / 70 SemiBold | `h1` 44 | reuse — 6px, but the same role is drawn 46–50 across three frames |
+| Card title 40 / 50 SemiBold | `h1` 44 | reuse — 4px, same family and weight |
+| Stat number 29 Medium | `h3` 28 | reuse — 1px |
+| Body 17.9 / 26.88 | `lead` 18 | reuse — line-height only |
+| Eyebrow 11 Bold, 2.5px tracking | `eyebrow` 11 | reuse |
+
+Five candidate tokens, none added.
+
+**Weight is the tiebreak size cannot settle.** A 20px Medium card title has
+`lead` 2px away — inside the rule — but `lead` is 400, which would leave a title
+and its caption at the same weight and erase the hierarchy. No 500-weight step
+exists above 14px, so that one earns a token. The question is never "does the
+number match", it is "can an existing step do this job".
+
+**When frames disagree, that is a Figma bug, not a token.** The band heading is
+drawn Bold 48/58, Regular 46.1/58.93 and SemiBold 50/70 in three different
+frames. Emit one step, use it everywhere, and raise the inconsistency — three
+tokens would encode the mistake permanently.
+
 ### Accessibility overrides fidelity
 
 Your design system's contrast table records where Figma's colour fails and what
