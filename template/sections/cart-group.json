@@ -1,0 +1,52 @@
+{
+  "type": "aside",
+  "name": "Cart",
+  "sections": {
+    "__NS___cart_drawer": {
+      "type": "__NS__-cart-drawer",
+      "blocks": {
+        "shipping_goal": {
+          "type": "shipping_goal",
+          "settings": {
+            "threshold": 75,
+            "message": "You're only [amount] away from free shipping",
+            "reached_message": "Free shipping unlocked",
+            "position": "top"
+          }
+        },
+        "discount": {
+          "type": "discount",
+          "settings": {
+            "label": "Discount code",
+            "placeholder": "Enter code",
+            "apply_label": "Apply",
+            "invalid_message": "That code is not valid for the items in your bag.",
+            "position": "bottom"
+          }
+        },
+        "note": {
+          "type": "note",
+          "settings": {
+            "label": "Add a note to your order",
+            "position": "bottom"
+          }
+        },
+        "trust_secure": {
+          "type": "trust_signal",
+          "settings": {
+            "text": "Secure checkout"
+          }
+        },
+        "trust_returns": {
+          "type": "trust_signal",
+          "settings": {
+            "text": "Free returns"
+          }
+        }
+      },
+      "block_order": ["shipping_goal", "discount", "note", "trust_secure", "trust_returns"],
+      "settings": {}
+    }
+  },
+  "order": ["__NS___cart_drawer"]
+}

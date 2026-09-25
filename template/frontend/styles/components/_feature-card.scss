@@ -1,0 +1,130 @@
+@use 'utils' as u;
+
+/// Figma node 40012052:16062, the one Card component behind both the blog grid
+/// and every Featured collection frame. It sits on a glass panel, so its fill is
+/// one step more opaque than the sheet underneath — matching the panel's 40%
+/// would dissolve the card into it.
+.__NS__-feature-card {
+  display: flex;
+  position: relative;
+  flex-direction: column;
+  gap: u.fluid(14, 20);
+  min-height: u.fluid(360, 500);
+  padding: u.fluid(14, 20);
+  border: u.rem(1) solid u.role('surface-default');
+  border-radius: u.radius('xs');
+  background-color: u.role('surface-card');
+  box-shadow: u.shadow('card');
+
+  @include u.transition(background-color, box-shadow, translate);
+
+  &:has(.__NS__-feature-card__link:hover),
+  &:has(.__NS__-feature-card__link:focus-visible) {
+    background-color: u.role('surface-default');
+    box-shadow: u.shadow('raised');
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    &:has(.__NS__-feature-card__link:hover) {
+      translate: 0 #{u.rem(-2)};
+    }
+  }
+}
+
+/// A window rather than an aspect ratio: every card in the row has to line its
+/// title up with its neighbours whatever shape the merchant uploaded. The window
+/// scales with the viewport so a three-up row on a laptop is not a letterbox.
+.__NS__-feature-card__media {
+  overflow: hidden;
+  flex-shrink: 0;
+  height: u.fluid(150, 225);
+  border-radius: u.rem(4);
+}
+
+/// The image snippet wraps every <img> in a <picture>, and a percentage height
+/// against an auto-height wrapper computes to auto — so the wrapper has to fill
+/// the window before the image can.
+.__NS__-feature-card__media picture {
+  display: block;
+  height: 100%;
+}
+
+.__NS__-feature-card__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+
+.__NS__-feature-card__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: u.fluid(8, 10);
+}
+
+.__NS__-feature-card__tag {
+  margin: 0;
+}
+
+.__NS__-feature-card__title {
+  @include u.type('h2');
+
+  margin: 0;
+  color: u.role('text-body');
+}
+
+/// The stretched pseudo-element is what makes the whole card clickable while
+/// the link itself still announces only the title.
+.__NS__-feature-card__link {
+  color: inherit;
+  text-decoration: none;
+
+  @include u.focus-ring($offset: 4px, $halo: false);
+
+  &::after {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    content: '';
+  }
+}
+
+/// Figma draws the hairline as its own node between title and excerpt; a border
+/// on the excerpt is the same line without an empty element to place.
+///
+/// An article excerpt arrives as one string and a merchant's own copy arrives as
+/// rich text, so this is a container rather than a paragraph.
+.__NS__-feature-card__excerpt {
+  @include u.type('body');
+
+  margin: 0;
+  padding-block-start: u.fluid(8, 10);
+  border-block-start: u.rem(1) solid u.role('border-rule');
+  line-height: 1.36;
+  color: u.role('text-subtle');
+
+  > :last-child {
+    margin-block-end: 0;
+  }
+}
+
+.__NS__-feature-card__date {
+  @include u.type('body');
+
+  display: flex;
+  align-items: center;
+  gap: u.fluid(8, 10);
+  margin: 0;
+  margin-block-start: auto;
+  line-height: 1.36;
+  color: u.role('text-subtle');
+}
+
+.__NS__-icon-calendar {
+  display: block;
+  flex-shrink: 0;
+  width: u.rem(18);
+  height: u.rem(19);
+  color: u.role('text-eyebrow');
+}

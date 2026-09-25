@@ -1,0 +1,83 @@
+name: Build
+
+on:
+  push:
+    branches: [main, staging, qa]
+  pull_request:
+    branches: [main, staging, qa]
+
+# Assets derive entirely from source, so only the newest push per branch is worth
+# building. Cancelling superseded runs also stops two of them racing to push their
+# asset commit, which leaves one rejected with "fetch first".
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Without this guard, the workflow's own asset commit triggers another build.
+    if: github.actor != 'github-actions[bot]' && github.actor != 'shopify[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Corepack must run before any yarn call. setup-node's built-in yarn cache
+      # runs earlier and would probe the runner's preinstalled Yarn 1.
+      - run: corepack enable
+
+      - id: yarn-cache
+        run: echo "dir=$(yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: yarn-${{ runner.os }}-
+
+      - run: yarn install --immutable
+      - run: yarn type-check
+      - run: yarn lint
+      # Catches what a Horizon upgrade silently undid: an add-to-cart form that
+      # lost its Liquid Ajax Cart wrapper, or a Horizon cart script coming back.
+      - run: yarn check:boundary
+      - run: yarn build
+
+      - name: Commit built assets
+        if: github.event_name == 'push'
+        id: commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A assets snippets/vite-tag.liquid
+          if [[ -n $(git status --porcelain) ]]; then
+            git commit -m "chore(assets): compile theme assets"
+            echo "changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Push built assets
+        if: github.event_name == 'push' && steps.commit.outputs.changes == 'true'
+        run: |
+          for attempt in 1 2 3; do
+            git push origin HEAD:${{ github.ref_name }} && exit 0
+            git fetch origin ${{ github.ref_name }}
+            # In a rebase 'theirs' is the commit being replayed - the assets this
+            # run just built, the correct winner for generated output.
+            git rebase -X theirs origin/${{ github.ref_name }} || {
+              git rebase --abort; exit 1;
+            }
+          done
+          exit 1
+
+      - name: Verify assets are in sync (PR)
+        if: github.event_name == 'pull_request'
+        run: git diff --exit-code assets/ snippets/vite-tag.liquid

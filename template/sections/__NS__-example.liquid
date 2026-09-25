@@ -1,0 +1,159 @@
+{%- comment -%}
+  Reference section. Copy this file, its module folder and its SCSS partial as
+  the starting point for a new one. Four things it exists to demonstrate:
+
+  1. The <__NS__-example> tag is what mounts the component. No data-section-type,
+     no registry, no boot scan — and no JavaScript at all until the tag is on
+     the page, which is the point.
+  2. Loading priority comes from `section.index`. The first section on a page
+     holds the LCP candidate, so `__NS__-image` loads it eagerly; below that it
+     lazy-loads. Always pass `section_index: section.index`.
+  3. Every image slot names a placeholder. See below.
+  4. Motion belongs to <__NS__-reveal>. It arms the hidden state itself, so text
+     stays visible when the bundle fails, and it honours reduced motion.
+  5. Settings reach the component as one escaped JSON blob, not as a dozen
+     data attributes.
+
+  ## Empty image slots
+
+  A merchant adds a section before they have the photography for it. An image
+  slot that renders nothing collapses the layout, so the section reads as broken
+  when it is merely unfilled — and the merchant cannot see the shape they are
+  filling. So: **every `__NS__-image` call passes a `placeholder`.**
+
+      {%- render '__NS__-image',
+        image: section.settings.image,
+        placeholder: 'image',
+        section_index: section.index,
+        classes: '__NS__-example__image'
+      -%}
+
+  `__NS__-image` draws Shopify's `placeholder_svg_tag` whenever the image is blank,
+  and puts `classes` on the placeholder as well as on the real `<img>`. The slot
+  therefore holds the same box either way and nothing moves when the image lands
+  — so size the image in SCSS through that shared class, never through a wrapper
+  that only exists on one branch of an `{% if %}`.
+
+  Pick the placeholder that matches the slot, not whatever is shortest:
+
+  | Slot                        | Name                                |
+  |-----------------------------|-------------------------------------|
+  | Product media               | `product-1` … `product-6`           |
+  | Collection or category tile | `collection-1` … `collection-6`     |
+  | Full-bleed or hero media    | `lifestyle-1`, `lifestyle-2`        |
+  | Editorial card, logo, generic | `image`                           |
+
+  The placeholder is unconditional — it renders on the storefront, not only in
+  the theme editor. An empty slot is the same empty slot either way, and a
+  section that looks right in the editor and collapses on the storefront is
+  worse than one that is honestly unfilled in both.
+
+  One slot takes no placeholder: **decorative art** — a texture, a line-art
+  flourish, anything `aria-hidden`. It is absent by design, and a placeholder
+  would invent a focal point the section never had. Leave it gated on the image:
+
+      {%- if section.settings.panel_texture != blank -%}
+
+  ## Mobile art direction
+
+  Every image slot has an `<id>_mobile` companion, and it is paired in two
+  places — the schema and the render:
+
+      {
+        "type": "image_picker",
+        "id": "image_mobile",
+        "label": "Mobile image",
+        "info": "Optional. Replaces the image below 768px. …",
+        "visible_if": "{{ section.settings.image != blank }}"
+      }
+
+      {%- render '__NS__-image',
+        image: section.settings.image,
+        mobile_image: section.settings.image_mobile,
+        placeholder: 'image',
+      -%}
+
+  `visible_if` keeps the mobile picker out of the sidebar until the desktop
+  image exists, because a mobile override with nothing to override is noise in a
+  panel a merchant has to read top to bottom. Use `block.settings.` for a block.
+
+  `__NS__-image` turns the pair into a `<picture>` with a `(max-width: 767.98px)`
+  source, so the browser fetches one file. Never reach for a second `<img>`
+  hidden by CSS — a hidden image still downloads, and the visitor on the slower
+  connection pays for both.
+{%- endcomment -%}
+
+{%- liquid
+  assign image_alt = ''
+  if section.settings.heading != blank
+    assign image_alt = section.settings.heading | append: ' image'
+  endif
+-%}
+
+{%- capture config -%}
+{"heading": {{ section.settings.heading | json }}, "buttonLabel": {{ section.settings.button_label | json }}}
+{%- endcapture -%}
+
+<__NS__-example data-config="{{ config | escape }}">
+  {%- render '__NS__-image',
+    image: section.settings.image,
+    mobile_image: section.settings.image_mobile,
+    alt: image_alt,
+    placeholder: 'image',
+    sizes: '(min-width: 768px) 50vw, 100vw',
+    section_index: section.index,
+    classes: '__NS__-example__image'
+  -%}
+
+  <__NS__-reveal class="__NS__-example__body">
+    {%- render '__NS__-heading',
+      text: section.settings.heading,
+      tag: 'h2',
+      size: 'h1',
+      animation: 'rise',
+      classes: '__NS__-example__heading'
+    -%}
+
+    <button type="button" class="__NS__-example__action" data-ref="action" data-reveal>
+      {{- section.settings.button_label -}}
+    </button>
+  </__NS__-reveal>
+</__NS__-example>
+
+{% schema %}
+{
+  "name": "__NS_TITLE__ example",
+  "tag": "section",
+  "settings": [
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Example section"
+    },
+    {
+      "type": "image_picker",
+      "id": "image",
+      "label": "Image"
+    },
+    {
+      "type": "image_picker",
+      "id": "image_mobile",
+      "label": "Mobile image",
+      "info": "Optional. Replaces the image below 768px. One request either way — it becomes a <picture> source, not a second download.",
+      "visible_if": "{{ section.settings.image != blank }}"
+    },
+    {
+      "type": "text",
+      "id": "button_label",
+      "label": "Button label",
+      "default": "Toggle"
+    }
+  ],
+  "presets": [
+    {
+      "name": "__NS_TITLE__ example"
+    }
+  ]
+}
+{% endschema %}

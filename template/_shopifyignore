@@ -1,0 +1,49 @@
+# Files excluded from Shopify theme uploads.
+# Only compiled output in assets/ ships; frontend/ is the source of truth.
+# Patterns are globs — a bare directory name does not match, so each entry
+# needs an explicit /* or /**.
+
+node_modules/**
+frontend/**
+tools/**
+dist/**
+
+# Scratch space for reference copies of the theme — never uploaded.
+initial build/**
+.git/**
+.github/**
+.claude/**
+.shopify/**
+.yarn/**
+.vscode/**
+.idea/**
+
+# Vite writes its build manifest here; Shopify rejects subfolders under assets/.
+assets/.vite/**
+
+vite.config.js
+postcss.config.js
+eslint.config.js
+tsconfig.json
+package.json
+setup.ts
+setup.config.json
+setup.config.example.json
+bun.lock
+bun.lockb
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.yarnrc.yml
+.pnp.*
+.eslintcache
+.editorconfig
+.prettierrc*
+
+*.md
+.env*
+shopify.theme.toml
+example.shopify.theme.toml
+
+.DS_Store
+Thumbs.db

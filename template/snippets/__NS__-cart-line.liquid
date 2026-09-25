@@ -1,0 +1,120 @@
+{%- comment -%}
+  One cart line.
+
+  @param line  {line_item}  A line item from cart.items. Required.
+
+  The stepper is two links around a live input, not buttons: Liquid Ajax Cart
+  binds <ajax-cart-quantity> and reads the Cart API URL off each href, so the
+  controls work as plain links before any JavaScript runs.
+
+  Quantities are computed in Liquid from line.quantity, so two fast clicks can
+  never both read the same stale number off the DOM — the failure mode a stepper
+  that reads its own rendered value always has.
+{%- endcomment -%}
+
+{%- liquid
+  assign line_index = line.index | plus: 1
+  assign decrease_label = 'Decrease quantity of ' | append: line.product.title
+  assign increase_label = 'Increase quantity of ' | append: line.product.title
+  assign quantity_label = 'Quantity of ' | append: line.product.title
+  assign remove_label = 'Remove ' | append: line.product.title | append: ' from your bag'
+-%}
+
+<li class="__NS__-cart-line" data-key="{{ line.key }}">
+  <a class="__NS__-cart-line__media" href="{{ line.url }}" tabindex="-1" aria-hidden="true">
+    {%- if line.image -%}
+      {{
+        line.image
+        | image_url: width: 264
+        | image_tag:
+          class: '__NS__-cart-line__image',
+          loading: 'lazy',
+          widths: '88,176,264',
+          sizes: '88px',
+          alt: line.image.alt
+      }}
+    {%- else -%}
+      <span class="__NS__-cart-line__image __NS__-cart-line__image--empty"></span>
+    {%- endif -%}
+  </a>
+
+  <div class="__NS__-cart-line__body">
+    <div class="__NS__-cart-line__head">
+      <div class="__NS__-cart-line__text">
+        <a class="__NS__-cart-line__title" href="{{ line.url }}">{{ line.product.title | escape }}</a>
+
+        {%- unless line.product.has_only_default_variant -%}
+          <span class="__NS__-cart-line__variant">{{ line.variant.title | escape }}</span>
+        {%- endunless -%}
+
+        {%- if line.selling_plan_allocation -%}
+          <span class="__NS__-cart-line__variant">
+            {{- line.selling_plan_allocation.selling_plan.name | escape -}}
+          </span>
+        {%- endif -%}
+
+        {%- for discount in line.line_level_discount_allocations -%}
+          <span class="__NS__-cart-line__discount">
+            {{- discount.discount_application.title | escape }} (&minus;{{ discount.amount | money -}})
+          </span>
+        {%- endfor -%}
+      </div>
+
+      <p class="__NS__-cart-line__price">
+        {%- if line.original_line_price > line.final_line_price -%}
+          <s class="__NS__-cart-line__price-was">{{ line.original_line_price | money }}</s>
+        {%- endif -%}
+        {{ line.final_line_price | money }}
+      </p>
+    </div>
+
+    <div class="__NS__-cart-line__controls">
+      <ajax-cart-quantity class="__NS__-stepper">
+        <a
+          class="__NS__-stepper__button"
+          href="{{ routes.cart_change_url }}?line={{ line_index }}&quantity={{ line.quantity | minus: 1 }}"
+          aria-label="{{ decrease_label | escape }}"
+          data-ajax-cart-quantity-minus
+        >
+          {%- render '__NS__-icon-minus' -%}
+        </a>
+
+        <input
+          class="__NS__-stepper__count"
+          type="number"
+          name="updates[]"
+          value="{{ line.quantity }}"
+          min="0"
+          inputmode="numeric"
+          aria-label="{{ quantity_label | escape }}"
+          data-ajax-cart-quantity-input="{{ line_index }}"
+        >
+
+        <a
+          class="__NS__-stepper__button"
+          href="{{ routes.cart_change_url }}?line={{ line_index }}&quantity={{ line.quantity | plus: 1 }}"
+          aria-label="{{ increase_label | escape }}"
+          data-ajax-cart-quantity-plus
+        >
+          {%- render '__NS__-icon-plus' -%}
+        </a>
+      </ajax-cart-quantity>
+
+      <a
+        class="__NS__-cart-line__remove"
+        href="{{ routes.cart_change_url }}?line={{ line_index }}&quantity=0"
+        data-ajax-cart-request-button
+      >
+        <span aria-hidden="true">Remove</span>
+        <span class="visually-hidden">{{ remove_label | escape }}</span>
+      </a>
+    </div>
+
+    {%- comment -%}
+      Line-level failures land here — "only 3 left", a variant that sold out
+      between the page load and the click. Horizon logged these to the console
+      and showed the shopper nothing.
+    {%- endcomment -%}
+    <div class="__NS__-cart-line__error" data-ajax-cart-errors="{{ line.key }}"></div>
+  </div>
+</li>

@@ -1,0 +1,67 @@
+@use 'sass:map';
+@use './unit' as unit;
+@use './vw-calc' as vw;
+
+/// Plantin sets editorial voice, Geist runs the interface, Brandon does eyebrows.
+/// Every family needs a real fallback: none of the three are system fonts, and
+/// none ship with the theme yet.
+$fonts: (
+  'display': (#{'Plantin MT Pro'}, #{'Plantin'}, Georgia, #{'Times New Roman'}, serif),
+  'body': (#{'Geist'}, -apple-system, BlinkMacSystemFont, #{'Helvetica Neue'}, Arial, sans-serif),
+  'eyebrow': (#{'Brandon Grotesque'}, #{'Geist'}, -apple-system, Arial, sans-serif),
+) !default;
+
+/// Sizes are the desktop values off the 1400px artboard, paired with a mobile
+/// value so every step scales rather than stepping at a breakpoint.
+$scale: (
+  'wordmark': ('family': 'display', 'weight': 300, 'min': 56, 'max': 200, 'leading': 1, 'tracking': -0.001em, 'case': none),
+  'display-xl': ('family': 'display', 'weight': 400, 'min': 40, 'max': 64, 'leading': 1, 'tracking': 0, 'case': none),
+  'display': ('family': 'display', 'weight': 300, 'min': 36, 'max': 56, 'leading': 1.02, 'tracking': -0.01em, 'case': none),
+  'h1': ('family': 'display', 'weight': 300, 'min': 30, 'max': 40, 'leading': 1.05, 'tracking': -0.01em, 'case': none),
+  'h2': ('family': 'display', 'weight': 400, 'min': 26, 'max': 32, 'leading': 1, 'tracking': 0, 'case': none),
+  'h3': ('family': 'display', 'weight': 300, 'min': 20, 'max': 24, 'leading': 1.15, 'tracking': 0, 'case': none),
+  'h4': ('family': 'display', 'weight': 600, 'min': 18, 'max': 20, 'leading': 1.2, 'tracking': 0, 'case': none),
+  'body-l': ('family': 'body', 'weight': 300, 'min': 18, 'max': 20, 'leading': 1.5, 'tracking': 0, 'case': none),
+  'body': ('family': 'body', 'weight': 400, 'min': 16, 'max': 16, 'leading': 1.5, 'tracking': 0, 'case': none),
+  'body-s': ('family': 'body', 'weight': 300, 'min': 14, 'max': 14, 'leading': 1.5, 'tracking': 0, 'case': none),
+  'label': ('family': 'body', 'weight': 500, 'min': 14, 'max': 14, 'leading': 1.571, 'tracking': -0.0143em, 'case': none),
+  'button': ('family': 'body', 'weight': 500, 'min': 14, 'max': 16, 'leading': 1.25, 'tracking': 0, 'case': none),
+  'caption': ('family': 'body', 'weight': 300, 'min': 12, 'max': 12, 'leading': 1.4, 'tracking': 0, 'case': none),
+  'eyebrow': ('family': 'eyebrow', 'weight': 500, 'min': 14, 'max': 16, 'leading': 1, 'tracking': 0.125em, 'case': uppercase),
+) !default;
+
+@function family($key) {
+  @if not map.has-key($fonts, $key) {
+    @error 'Unknown font family "#{$key}". Available: #{map.keys($fonts)}.';
+  }
+
+  @return var(--__NS__-font-#{$key});
+}
+
+@function step($key) {
+  @if not map.has-key($scale, $key) {
+    @error 'Unknown type step "#{$key}". Available: #{map.keys($scale)}.';
+  }
+
+  @return map.get($scale, $key);
+}
+
+/// Tracking is in em and leading is unitless, so both track the fluid size.
+@mixin type($key) {
+  $_step: step($key);
+  $_min: map.get($_step, 'min');
+  $_max: map.get($_step, 'max');
+
+  font-family: family(map.get($_step, 'family'));
+  font-weight: map.get($_step, 'weight');
+
+  @if $_min == $_max {
+    font-size: unit.rem($_min);
+  } @else {
+    font-size: vw.fluid($_min, $_max);
+  }
+
+  line-height: map.get($_step, 'leading');
+  letter-spacing: map.get($_step, 'tracking');
+  text-transform: map.get($_step, 'case');
+}

@@ -1,0 +1,80 @@
+@use '../utils' as u;
+
+/// The two grounds every section builds on: a panel floating on the canvas, and
+/// a card floating on that panel. Both are flat fills rather than glass — each
+/// one covers what is behind it, so a backdrop blur resolves to the fill it
+/// already has. `surface-glass` is for the overlays that float over moving
+/// content: the header dropdown, the cart drawer, a control.
+.__NS__-panel {
+  background-color: u.role('surface-panel');
+
+  padding: u.space('xl');
+  border-radius: u.radius('md');
+  box-shadow: u.shadow('card');
+  overflow: hidden;
+}
+
+.__NS__-card {
+  --__NS__-card-border: #{u.role('surface-default')};
+
+  background-color: u.role('surface-card');
+  @include u.transition(border-color, box-shadow, translate);
+
+  display: flex;
+  flex-direction: column;
+  gap: u.space('sm');
+  padding: u.space('lg');
+  border: u.rem(1) solid var(--__NS__-card-border);
+  border-radius: u.radius('xs');
+  box-shadow: u.shadow('card');
+}
+
+.__NS__-card--solid {
+  background-color: u.role('surface-default');
+}
+
+.__NS__-card--interactive {
+  @include u.focus-ring;
+
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    --__NS__-card-border: #{u.role('accent-soft')};
+
+    box-shadow: u.shadow('raised');
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    &:hover {
+      translate: 0 #{u.rem(-2)};
+    }
+  }
+}
+
+.__NS__-card__title {
+  @include u.type('h3');
+
+  margin: 0;
+}
+
+.__NS__-card__body {
+  @include u.type('body-s');
+
+  margin: 0;
+  color: u.role('text-muted');
+}
+
+/// Cards laid out on the page rhythm: one column on a phone, auto-fitting past
+/// it, so a row of four never becomes four unreadable slivers on a tablet.
+.__NS__-card-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: u.space('md');
+
+  @include u.min('sm') {
+    grid-template-columns: repeat(auto-fit, minmax(#{u.rem(220)}, 1fr));
+  }
+}

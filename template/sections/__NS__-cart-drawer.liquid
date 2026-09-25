@@ -1,0 +1,410 @@
+{%- comment -%}
+  Design: Figma node 40012291:16305 — https://www.figma.com/design/wbLM63qxSnsKERm3WsM2BZ/__NS_TITLE__---eComm---Marketing?node-id=40012291-16305
+
+  That frame is a flattened screenshot of a stock Horizon demo store, not a __NS_TITLE__
+  design, so only the empty state's layout was taken from it — right-hand panel,
+  a centred bag with a count badge, a heading and a pill. Colour and type come
+  from the Style Sheet. The full state has no frame yet.
+
+  The cart drawer, and the Section Rendering API target Liquid Ajax Cart
+  re-fetches after every cart change. It lives in the `cart` section group so it
+  is editable in the theme editor — a section rendered straight from the layout
+  has no editor presence at all, and its blocks could never be reordered.
+
+  Everything inside is server-rendered, and [data-ajax-cart-section] is
+  re-rendered from Liquid after every cart change — so money formatting,
+  discounts and the free-shipping maths stay here. Nothing in JavaScript
+  computes a price.
+
+  The section sits *inside* the <dialog> rather than around it, which is what
+  keeps the panel, its listeners and the open state alive across a re-render.
+{%- endcomment -%}
+
+{%- liquid
+  assign s = section.settings
+  assign checkout_form = '__NS__-cart-checkout-form'
+
+  assign item_word = s.items_plural
+  if cart.item_count == 1
+    assign item_word = s.items_singular
+  endif
+-%}
+
+{%- comment -%}
+  The same two gates Horizon's own drawer carried: a merchant who chose the cart
+  page over a drawer gets no drawer, and the cart page never shadows itself.
+{%- endcomment -%}
+{%- if settings.cart_type == 'drawer' and template.name != 'cart' -%}
+  {%- capture config -%}
+{"autoOpen": {{ s.auto_open | json }}}
+  {%- endcapture -%}
+
+  {%- comment -%}
+    Not id="cart-drawer". Horizon's theme-drawer restore script reopens saved
+    drawers by id straight from sessionStorage — it sets `open` as a plain
+    attribute, which would show this dialog non-modally with no backdrop and no
+    focus trap. A stale entry from before this drawer replaced Horizon's is
+    enough to trigger it, so the id stays out of that namespace.
+  {%- endcomment -%}
+  <__NS__-cart-drawer id="__NS__-cart-drawer" class="__NS__-cart-drawer" data-config="{{ config | escape }}">
+    {%- comment -%}
+      A <dialog>: showModal() brings the focus trap, the inert background, the
+      Escape handler and ::backdrop with it, and every one of those is something
+      a hand-rolled drawer gets subtly wrong.
+    {%- endcomment -%}
+    <dialog class="__NS__-cart-drawer__panel" data-ref="panel" aria-labelledby="__NS__-cart-drawer-title">
+      <div class="__NS__-cart-drawer__inner" data-ajax-cart-section>
+        <header class="__NS__-cart-drawer__header">
+          <h2 class="__NS__-cart-drawer__title" id="__NS__-cart-drawer-title">
+            {{ s.title }}
+            <span class="__NS__-cart-drawer__count">{{ cart.item_count }} {{ item_word }}</span>
+          </h2>
+
+          <button
+            class="__NS__-cart-drawer__close"
+            type="button"
+            data-ref="close"
+            aria-label="{{ 'actions.close' | t }}"
+          >
+            {%- render '__NS__-icon-close' -%}
+          </button>
+        </header>
+
+        {%- if cart.item_count > 0 -%}
+          {%- for block in section.blocks -%}
+            {%- if block.settings.position == 'top' -%}
+              {%- render '__NS__-cart-module', block: block, checkout_form: checkout_form -%}
+            {%- endif -%}
+          {%- endfor -%}
+
+          <div class="__NS__-cart-drawer__error" data-ajax-cart-errors="form"></div>
+
+          <ul class="__NS__-cart-drawer__items" data-ajax-cart-section-scroll>
+            {%- for line in cart.items -%}
+              {%- render '__NS__-cart-line', line: line -%}
+            {%- endfor -%}
+          </ul>
+
+          {%- for block in section.blocks -%}
+            {%- if block.settings.position == 'bottom' -%}
+              {%- render '__NS__-cart-module', block: block, checkout_form: checkout_form -%}
+            {%- endif -%}
+          {%- endfor -%}
+
+          <div class="__NS__-cart-summary">
+            <div class="__NS__-cart-summary__row">
+              <span>{{ s.subtotal_label }}</span>
+              <span>{{ cart.items_subtotal_price | money }}</span>
+            </div>
+
+            {%- for discount in cart.cart_level_discount_applications -%}
+              <div class="__NS__-cart-summary__row __NS__-cart-summary__row--discount">
+                <span>{{ discount.title | escape }}</span>
+                <span>&minus;{{ discount.total_allocated_amount | money }}</span>
+              </div>
+            {%- endfor -%}
+
+            {%- if s.shipping_note != blank -%}
+              <div class="__NS__-cart-summary__row __NS__-cart-summary__row--muted">
+                <span>{{ s.shipping_label }}</span>
+                <span>{{ s.shipping_note }}</span>
+              </div>
+            {%- endif -%}
+
+            <div class="__NS__-cart-summary__row __NS__-cart-summary__row--total">
+              <span>{{ s.total_label }}</span>
+              <span>{{ cart.total_price | money }}</span>
+            </div>
+          </div>
+
+          <footer class="__NS__-cart-drawer__footer">
+            <form action="{{ routes.cart_url }}" method="post" id="{{ checkout_form }}" novalidate>
+              {%- render '__NS__-button',
+                label: s.checkout_label,
+                variant: 'primary',
+                full: true,
+                type: 'submit',
+                arrow: true,
+                attrs: 'name="checkout"'
+              -%}
+            </form>
+
+            <p class="__NS__-cart-drawer__continue">
+              <button class="__NS__-cart-drawer__continue-link" type="button" data-ref="close">
+                {{- s.continue_label -}}
+              </button>
+            </p>
+
+            {%- assign trust_blocks = section.blocks | where: 'type', 'trust_signal' -%}
+            {%- if trust_blocks.size > 0 -%}
+              <ul class="__NS__-cart-trust">
+                {%- for block in trust_blocks -%}
+                  <li class="__NS__-cart-trust__item" {{ block.shopify_attributes }}>
+                    {{- block.settings.text -}}
+                  </li>
+                {%- endfor -%}
+              </ul>
+            {%- endif -%}
+          </footer>
+        {%- else -%}
+          <div class="__NS__-cart-drawer__empty">
+            <span class="__NS__-cart-drawer__empty-icon">
+              {%- render '__NS__-icon-cart' -%}
+              <span class="__NS__-cart-drawer__empty-badge">0</span>
+            </span>
+
+            <p class="__NS__-cart-drawer__empty-title">{{ s.empty_title }}</p>
+
+            {%- if s.empty_body != blank -%}
+              <p class="__NS__-cart-drawer__empty-body">{{ s.empty_body }}</p>
+            {%- endif -%}
+
+            {%- assign empty_link = s.empty_link | default: routes.all_products_collection_url -%}
+            {%- render '__NS__-button',
+              label: s.empty_link_label,
+              variant: 'primary',
+              href: empty_link,
+              arrow: true
+            -%}
+          </div>
+        {%- endif -%}
+      </div>
+    </dialog>
+  </__NS__-cart-drawer>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "__NS_TITLE__ cart drawer",
+  "tag": "div",
+  "class": "__NS__-cart-drawer-section",
+  "enabled_on": {
+    "groups": ["aside"]
+  },
+  "settings": [
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "default": "Your bag"
+    },
+    {
+      "type": "text",
+      "id": "items_singular",
+      "label": "Item word (one)",
+      "default": "item"
+    },
+    {
+      "type": "text",
+      "id": "items_plural",
+      "label": "Item word (many)",
+      "default": "items"
+    },
+    {
+      "type": "checkbox",
+      "id": "auto_open",
+      "label": "Open when something is added",
+      "default": true
+    },
+    {
+      "type": "header",
+      "content": "Summary"
+    },
+    {
+      "type": "text",
+      "id": "subtotal_label",
+      "label": "Subtotal label",
+      "default": "Subtotal"
+    },
+    {
+      "type": "text",
+      "id": "shipping_label",
+      "label": "Shipping label",
+      "default": "Shipping"
+    },
+    {
+      "type": "text",
+      "id": "shipping_note",
+      "label": "Shipping value",
+      "info": "Leave empty to hide the shipping row.",
+      "default": "Calculated at checkout"
+    },
+    {
+      "type": "text",
+      "id": "total_label",
+      "label": "Total label",
+      "default": "Total"
+    },
+    {
+      "type": "text",
+      "id": "checkout_label",
+      "label": "Checkout button",
+      "default": "Proceed to checkout"
+    },
+    {
+      "type": "text",
+      "id": "continue_label",
+      "label": "Continue shopping link",
+      "default": "Continue shopping"
+    },
+    {
+      "type": "header",
+      "content": "Empty state"
+    },
+    {
+      "type": "text",
+      "id": "empty_title",
+      "label": "Heading",
+      "default": "Your cart is empty"
+    },
+    {
+      "type": "textarea",
+      "id": "empty_body",
+      "label": "Body"
+    },
+    {
+      "type": "text",
+      "id": "empty_link_label",
+      "label": "Button label",
+      "default": "Continue shopping"
+    },
+    {
+      "type": "url",
+      "id": "empty_link",
+      "label": "Button link",
+      "info": "Defaults to the all-products collection."
+    }
+  ],
+  "blocks": [
+    {
+      "type": "shipping_goal",
+      "name": "Free shipping progress",
+      "limit": 1,
+      "settings": [
+        {
+          "type": "number",
+          "id": "threshold",
+          "label": "Free shipping over",
+          "info": "In your store currency, without the symbol. 0 hides the module.",
+          "default": 75
+        },
+        {
+          "type": "inline_richtext",
+          "id": "message",
+          "label": "Message below the threshold",
+          "info": "[amount] is replaced with what is still to spend.",
+          "default": "You're only [amount] away from free shipping"
+        },
+        {
+          "type": "inline_richtext",
+          "id": "reached_message",
+          "label": "Message once reached",
+          "default": "Free shipping unlocked"
+        },
+        {
+          "type": "select",
+          "id": "position",
+          "label": "Position",
+          "options": [
+            { "value": "top", "label": "Above the items" },
+            { "value": "bottom", "label": "Below the items" }
+          ],
+          "default": "top"
+        }
+      ]
+    },
+    {
+      "type": "discount",
+      "name": "Discount code",
+      "limit": 1,
+      "settings": [
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Label",
+          "default": "Discount code"
+        },
+        {
+          "type": "text",
+          "id": "placeholder",
+          "label": "Placeholder",
+          "default": "Enter code"
+        },
+        {
+          "type": "text",
+          "id": "apply_label",
+          "label": "Apply button",
+          "default": "Apply"
+        },
+        {
+          "type": "text",
+          "id": "invalid_message",
+          "label": "Rejected code message",
+          "default": "That code is not valid for the items in your bag."
+        },
+        {
+          "type": "select",
+          "id": "position",
+          "label": "Position",
+          "options": [
+            { "value": "top", "label": "Above the items" },
+            { "value": "bottom", "label": "Below the items" }
+          ],
+          "default": "bottom"
+        }
+      ]
+    },
+    {
+      "type": "note",
+      "name": "Order note",
+      "limit": 1,
+      "settings": [
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Label",
+          "default": "Add a note to your order"
+        },
+        {
+          "type": "text",
+          "id": "placeholder",
+          "label": "Placeholder"
+        },
+        {
+          "type": "select",
+          "id": "position",
+          "label": "Position",
+          "options": [
+            { "value": "top", "label": "Above the items" },
+            { "value": "bottom", "label": "Below the items" }
+          ],
+          "default": "bottom"
+        }
+      ]
+    },
+    {
+      "type": "trust_signal",
+      "name": "Trust signal",
+      "settings": [
+        {
+          "type": "inline_richtext",
+          "id": "text",
+          "label": "Text",
+          "default": "Secure checkout"
+        }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "__NS_TITLE__ cart drawer",
+      "blocks": [
+        { "type": "shipping_goal" },
+        { "type": "discount" },
+        { "type": "note" },
+        { "type": "trust_signal" }
+      ]
+    }
+  ]
+}
+{% endschema %}

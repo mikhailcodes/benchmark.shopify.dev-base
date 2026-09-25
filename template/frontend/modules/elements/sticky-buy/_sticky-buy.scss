@@ -1,0 +1,9 @@
+@use 'utils' as u;
+
+// The bar itself is Horizon's, and so is its styling — this element only
+// restores the visibility toggle its script used to own. No transform, filter
+// or contain here: any of the three would make this the containing block for
+// the fixed bar inside, and the bar would stop tracking the viewport.
+__NS__-sticky-buy {
+  display: block;
+}

@@ -1,0 +1,19 @@
+@use '../utils' as u;
+
+/// Horizon decoration the __NS_TITLE__ system replaces. Structural CSS — grid, drawer
+/// mechanics, media containers — stays: removing it breaks Horizon's JavaScript.
+.button,
+.button-secondary,
+.shopify-payment-button__button--unbranded {
+  font-family: u.family('body');
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/// Horizon's card hover lifts and re-tints; __NS_TITLE__ cards state hover on the border
+/// and shadow instead, set in components/_card.scss.
+.card-hover-effect-lift .card:hover,
+.card-hover-effect-zoom .card:hover {
+  transform: none;
+}

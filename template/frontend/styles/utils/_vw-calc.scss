@@ -1,0 +1,35 @@
+@use 'sass:list';
+@use 'sass:math';
+@use 'sass:meta';
+@use './unit' as unit;
+
+$min-viewport: 390 !default;
+$max-viewport: 1400 !default;
+
+/// Fluid size that scales linearly with the viewport and clamps at both ends.
+/// fluid(16, 32) -> 16px at 390px wide, 32px at 1400px wide — the two
+/// artboards in the Figma style sheet.
+/// A three-value list is accepted for parity with older call sites; the middle
+/// value is the midpoint reference only and does not bend the curve.
+@function fluid($min, $max: null) {
+  @if $max == null {
+    @if meta.type-of($min) != 'list' {
+      @error 'fluid() needs a min and max, or a list of sizes.';
+    }
+
+    $max: list.nth($min, list.length($min));
+    $min: list.nth($min, 1);
+  }
+
+  $min-px: unit.strip-unit($min);
+  $max-px: unit.strip-unit($max);
+
+  $slope: math.div($max-px - $min-px, $max-viewport - $min-viewport);
+  $intercept: $min-px - $slope * $min-viewport;
+
+  @return clamp(
+    #{unit.rem($min-px)},
+    #{unit.rem($intercept)} + #{$slope * 100}vw,
+    #{unit.rem($max-px)}
+  );
+}

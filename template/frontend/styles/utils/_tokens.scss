@@ -1,0 +1,196 @@
+@use 'sass:map';
+@use './colors' as colors;
+@use './unit' as unit;
+@use './vw-calc' as vw;
+
+/// 4px base. Steps past 'md' are fluid, so section rhythm scales with the page.
+$space: (
+  'xs': unit.rem(4),
+  'sm': unit.rem(8),
+  'md': unit.rem(16),
+  'lg': vw.fluid(20, 32),
+  'xl': vw.fluid(32, 55),
+  '2xl': vw.fluid(40, 75),
+  '3xl': vw.fluid(56, 118),
+) !default;
+
+$layout: (
+  'page-margin': vw.fluid(20, 44),
+  'gutter': vw.fluid(16, 24),
+  // The 20px gutter eight sections had each spelled out as a literal. One
+  // definition, and it scales like everything else it sits between.
+  'grid-gap': vw.fluid(16, 20),
+  'content-max': unit.rem(1400),
+  'measure': 68ch,
+) !default;
+
+$radius: (
+  'xs': unit.rem(6),
+  'sm': unit.rem(8),
+  'md': unit.rem(10),
+  'lg': unit.rem(18),
+  'xl': unit.rem(20),
+  'pill': unit.rem(50),
+  'full': 999px,
+) !default;
+
+/// Glass is the signature surface in this system: a translucent white fill over
+/// a backdrop blur, not a flat panel.
+$glass: (
+  'fill': rgba(colors.hex('neutral.pure'), 0.4),
+  // A card sitting on a 'fill' panel: one step back so the two surfaces separate.
+  'fill-weak': rgba(colors.hex('neutral.pure'), 0.3),
+  'fill-strong': rgba(colors.hex('neutral.pure'), 0.7),
+  'blur': 40px,
+  // The footer's quiz card: a card-weight blur, between the overlay and control steps.
+  'blur-card': 7.5px,
+  'blur-control': 6px,
+  'border': rgba(colors.hex('neutral.pure'), 0.18),
+) !default;
+
+$shadow: (
+  'card': 0 unit.rem(4) unit.rem(14) rgba(colors.hex('blue.800'), 0.04),
+  'control': (0 0 unit.rem(2) rgba(0, 0, 0, 0.1), 0 unit.rem(1) unit.rem(8) rgba(0, 0, 0, 0.1)),
+  'raised': 0 unit.rem(8) unit.rem(24) rgba(colors.hex('blue.800'), 0.08),
+  'menu': 0 unit.rem(2) unit.rem(12) colors.hex('neutral.border'),
+) !default;
+
+$control: (
+  'height-lg': vw.fluid(52, 60),
+  'height-md': vw.fluid(40, 44),
+  'height-sm': vw.fluid(32, 36),
+  'pad-lg': vw.fluid(16, 30),
+  'pad-md': vw.fluid(16, 22),
+  'pad-sm': vw.fluid(9, 12),
+  'touch-target': unit.rem(44),
+) !default;
+
+$transition: (
+  'fast': 150ms,
+  'base': 250ms,
+  'slow': 400ms,
+) !default;
+
+/// Exponential ease-out. No spring or elastic curve: overshoot on a commerce
+/// control reads as a glitch, not as polish.
+$easing: (
+  'out': cubic-bezier(0.22, 1, 0.36, 1),
+  'out-expo': cubic-bezier(0.16, 1, 0.3, 1),
+  'in-out': cubic-bezier(0.65, 0, 0.35, 1),
+) !default;
+
+$z: (
+  'base': 1,
+  'raised': 10,
+  'sticky': 100,
+  'overlay': 200,
+  'modal': 300,
+  'toast': 400,
+) !default;
+
+@function _lookup($map, $key, $name) {
+  @if not map.has-key($map, $key) {
+    @error 'Unknown #{$name} "#{$key}". Available: #{map.keys($map)}.';
+  }
+
+  @return map.get($map, $key);
+}
+
+@function space($key) {
+  @return var(--__NS__-space-#{$key}, #{_lookup($space, $key, 'space step')});
+}
+
+@function layout($key) {
+  @return var(--__NS__-layout-#{$key}, #{_lookup($layout, $key, 'layout token')});
+}
+
+@function radius($key) {
+  @return var(--__NS__-radius-#{$key}, #{_lookup($radius, $key, 'radius')});
+}
+
+@function shadow($key) {
+  @return var(--__NS__-shadow-#{$key}, #{_lookup($shadow, $key, 'shadow')});
+}
+
+@function glass($key) {
+  @return _lookup($glass, $key, 'glass token');
+}
+
+@function control($key) {
+  @return _lookup($control, $key, 'control token');
+}
+
+@function duration($key) {
+  @return var(--__NS__-duration-#{$key}, #{_lookup($transition, $key, 'duration')});
+}
+
+@function easing($key) {
+  @return var(--__NS__-ease-#{$key}, #{_lookup($easing, $key, 'easing')});
+}
+
+@function z($key) {
+  @return _lookup($z, $key, 'z-index');
+}
+
+/// The glass surface, as one include. Falls back to an opaque fill where
+/// backdrop-filter is unsupported, otherwise the panel reads as washed-out.
+///
+/// For overlays only — the header dropdown, the cart drawer, a control — where
+/// what sits behind the element moves and is worth seeing through. A section
+/// panel or a card takes `surface-panel` / `surface-card` instead: those grounds
+/// are opaque, so a backdrop filter costs a snapshot of everything behind them
+/// on every paint and resolves to the fill on its own. Five tiles in a row is
+/// five snapshots for no pixels.
+///
+/// Pass `$blur: null` for a translucent fill with no filter at all.
+///
+/// Transparency is also a stated accessibility preference, not only a taste: a
+/// visitor who asks to reduce it gets the opaque surface and no filter at all.
+@mixin surface-glass($fill: 'fill', $blur: 'blur') {
+  background-color: map.get($glass, $fill);
+
+  @if $blur {
+    @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+      -webkit-backdrop-filter: blur(map.get($glass, $blur));
+      backdrop-filter: blur(map.get($glass, $blur));
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      background-color: colors.role('surface-default');
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+}
+
+@mixin transition($properties...) {
+  transition-property: $properties;
+  transition-duration: duration('base');
+  transition-timing-function: easing('out');
+
+  @media (prefers-reduced-motion: reduce) {
+    transition-duration: 1ms;
+  }
+}
+
+/// Keyboard focus only, never suppressed (WCAG 2.4.7). Two-tone: the dark ring
+/// reads on light surfaces, and the light halo filling the offset gap keeps it
+/// visible on a dark one, where ring-against-fill would be 1.65:1. A dark
+/// section flips the ring itself by reassigning --__NS__-focus-ring.
+@mixin focus-ring($offset: 2px, $halo: true) {
+  &:focus-visible {
+    outline: unit.rem(2) solid colors.role('focus-ring');
+    outline-offset: $offset;
+
+    @if $halo {
+      box-shadow: 0 0 0 $offset colors.role('surface-default');
+    }
+  }
+}
+
+/// Pointer-coarse devices get the 44px target regardless of the visual height.
+@mixin touch-target($size: 44) {
+  @media (pointer: coarse) {
+    min-height: unit.rem($size);
+  }
+}

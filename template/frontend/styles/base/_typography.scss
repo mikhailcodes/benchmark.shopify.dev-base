@@ -1,0 +1,62 @@
+@use '../utils' as u;
+
+body {
+  @include u.type('body');
+
+  color: u.role('text-body');
+  background-color: u.role('background-canvas');
+  -webkit-font-smoothing: antialiased;
+}
+
+h1 { @include u.type('h1'); }
+h2 { @include u.type('h2'); }
+h3 { @include u.type('h3'); }
+h4,
+h5,
+h6 { @include u.type('h4'); }
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: u.role('text-primary');
+  text-wrap: balance;
+}
+
+p,
+li {
+  text-wrap: pretty;
+}
+
+small {
+  @include u.type('caption');
+}
+
+.__NS__-eyebrow {
+  @include u.type('eyebrow');
+
+  color: u.role('text-eyebrow');
+}
+
+.__NS__-measure {
+  max-width: u.layout('measure');
+}
+
+.__NS__-scheme-dark {
+  --__NS__-focus-ring: #{u.role-hex('background-canvas')};
+
+  color: u.role('text-on-dark');
+  background-color: u.role('action-primary');
+}
+
+/// One class per type step, so Liquid and the styleguide can reach the scale
+/// without a wrapper component.
+@each $_step, $_config in u.$scale {
+  .__NS__-type-#{$_step} {
+    @include u.type($_step);
+
+    margin: 0;
+  }
+}

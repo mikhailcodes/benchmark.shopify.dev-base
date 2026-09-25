@@ -1,0 +1,18 @@
+# Copy to shopify.theme.toml and fill in. That file is gitignored.
+#
+# password       = theme access token (shptka_...) from Settings → Apps → Develop apps
+# store_password = storefront password, only if the store is password-protected
+
+[environments.development]
+store = "your-store.myshopify.com"
+theme = "DEV_THEME_ID"
+password = "shptka_..."
+store_password = ""
+ignore = [".shopifyignore"]
+
+[environments.qa]
+store = "your-store.myshopify.com"
+theme = "QA_THEME_ID"
+password = "shptka_..."
+store_password = ""
+ignore = [".shopifyignore"]

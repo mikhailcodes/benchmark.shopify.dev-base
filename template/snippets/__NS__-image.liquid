@@ -1,0 +1,122 @@
+{%- comment -%}
+  Renders a responsive image with the loading strategy its position deserves.
+
+  `default` treats an empty string as missing, so passing `alt: ''` used to fall
+  through to the file's own alt text and a texture announced itself to a screen
+  reader as "footer glow". An explicit empty alt is a decision, not an omission:
+  the image is decoration, and it has to survive as alt="".
+
+  An empty slot draws Shopify's placeholder rather than collapsing, so a merchant
+  sees the shape a section will take before uploading anything. `classes` land on
+  the placeholder too, so it inherits whatever sizes the real image and the layout
+  does not move when the image arrives.
+
+  Priority comes from the section's position in the template: the first section
+  is above the fold, so its image is the LCP candidate and loads eagerly at high
+  priority. Everything below it lazy-loads. Pass `section_index: section.index`
+  and the snippet decides; pass `priority` only to overrule it.
+
+  @param image         {object}  Image. Falls back to the placeholder when blank.
+  @param placeholder   {string}  Shopify placeholder drawn when `image` is blank, e.g. 'image', 'product-1',
+                                 'collection-1', 'lifestyle-1', 'hero-apparel-1'. Omit to render nothing.
+  @param mobile_image  {object}  Art direction below the md breakpoint (768px). Optional, one request either way.
+  @param sizes         {string}  Sizes attribute. Default '100vw'.
+  @param widths        {string}  Comma list of srcset widths. Default covers 375–2400.
+  @param mobile_widths {string}  Comma list for the mobile source. Default covers 390–1170.
+  @param alt           {string}  Defaults to the image's own alt text. Pass '' to mark the image
+                                 decorative — it then emits alt="" and leaves the accessibility tree.
+  @param section_index {number}  Pass `section.index`. 1 means above the fold.
+  @param priority      {string}  'high' or 'low'. Overrules section_index.
+  @param classes       {string}  Extra classes.
+  @param attrs         {string}  Raw attributes, e.g. 'data-ref="media"'.
+{%- endcomment -%}
+
+{%- if image != blank -%}
+  {%- liquid
+    assign sizes = sizes | default: '100vw'
+    assign width_list = widths | default: '375,550,750,1100,1500,2000,2400' | split: ','
+    assign mobile_width_list = mobile_widths | default: '390,585,780,1170' | split: ','
+
+    assign is_priority = false
+    if priority == 'high'
+      assign is_priority = true
+    elsif priority != 'low' and section_index != blank and section_index <= 1
+      assign is_priority = true
+    endif
+
+    if is_priority
+      assign loading = 'eager'
+      assign fetch_priority = 'high'
+      assign decoding = 'sync'
+    else
+      assign loading = 'lazy'
+      assign fetch_priority = 'low'
+      assign decoding = 'async'
+    endif
+
+    assign image_class = '__NS__-image'
+    if classes != blank
+      assign image_class = image_class | append: ' ' | append: classes
+    endif
+
+    assign focal = image.presentation.focal_point | default: '50% 50%'
+
+    assign alt_text = alt
+    unless alt == ''
+      assign alt_text = alt | default: image.alt
+    endunless
+  -%}
+
+  {%- capture srcset -%}
+    {%- for width in width_list -%}
+      {%- assign w = width | plus: 0 -%}
+      {%- if w < image.width -%}{{ image | image_url: width: w }} {{ w }}w, {% endif -%}
+    {%- endfor -%}
+    {{ image | image_url: width: image.width }} {{ image.width }}w
+  {%- endcapture -%}
+
+  {%- comment -%}
+    <picture> rather than two <img> elements: a hidden image still downloads, so
+    switching art direction in CSS costs the visitor both files.
+  {%- endcomment -%}
+  <picture>
+    {%- if mobile_image != blank -%}
+      {%- capture mobile_srcset -%}
+        {%- for width in mobile_width_list -%}
+          {%- assign w = width | plus: 0 -%}
+          {%- if w < mobile_image.width -%}{{ mobile_image | image_url: width: w }} {{ w }}w, {% endif -%}
+        {%- endfor -%}
+        {{ mobile_image | image_url: width: mobile_image.width }} {{ mobile_image.width }}w
+      {%- endcapture -%}
+      <source
+        media="(max-width: 767.98px)"
+        srcset="{{ mobile_srcset }}"
+        sizes="{{ sizes }}"
+        width="{{ mobile_image.width }}"
+        height="{{ mobile_image.height }}"
+      >
+    {%- endif -%}
+    <img
+      class="{{ image_class }}"
+      src="{{ image | image_url: width: 1500 }}"
+      srcset="{{ srcset }}"
+      sizes="{{ sizes }}"
+      alt="{{ alt_text | escape }}"
+      width="{{ image.width }}"
+      height="{{ image.height }}"
+      loading="{{ loading }}"
+      fetchpriority="{{ fetch_priority }}"
+      decoding="{{ decoding }}"
+      style="object-position: {{ focal }};"
+      {{ attrs }}
+    >
+  </picture>
+{%- elsif placeholder != blank -%}
+  {%- liquid
+    assign placeholder_class = '__NS__-image __NS__-image--placeholder'
+    if classes != blank
+      assign placeholder_class = placeholder_class | append: ' ' | append: classes
+    endif
+  -%}
+  {{ placeholder | placeholder_svg_tag: placeholder_class }}
+{%- endif -%}

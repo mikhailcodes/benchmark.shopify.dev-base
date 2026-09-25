@@ -1,0 +1,23 @@
+@use 'utils' as u;
+
+.__NS__-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+picture:has(> .__NS__-image) {
+  display: block;
+}
+
+/// Shopify's placeholder, shown by __NS__-image when a slot is still empty. It
+/// carries the call site's own image class as well, so the section's sizing
+/// rules land on it and the slot holds the shape the real image will take —
+/// only the colour is decided here. The viewBox gives it an intrinsic ratio, so
+/// a slot with no height of its own still draws a square rather than collapsing.
+.__NS__-image--placeholder {
+  width: 100%;
+  height: auto;
+  background-color: u.role('border-default');
+  fill: u.role('text-subtle');
+}

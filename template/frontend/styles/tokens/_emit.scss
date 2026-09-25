@@ -1,0 +1,56 @@
+@use 'sass:map';
+@use '../utils' as u;
+
+/// The one place the SCSS maps become custom properties. utils/ stays
+/// output-free so any partial can @use it without duplicating a byte.
+:root {
+  @each $_family, $_stops in u.$palette {
+    @each $_stop, $_value in $_stops {
+      --__NS__-color-#{$_family}-#{$_stop}: #{$_value};
+    }
+  }
+
+  @each $_role, $_target in u.$roles {
+    --__NS__-#{$_role}: #{u.role-hex($_role)};
+  }
+
+  @each $_key, $_value in u.$fonts {
+    --__NS__-font-#{$_key}: #{$_value};
+  }
+
+  @each $_key, $_value in u.$space {
+    --__NS__-space-#{$_key}: #{$_value};
+  }
+
+  @each $_key, $_value in u.$layout {
+    --__NS__-layout-#{$_key}: #{$_value};
+  }
+
+  @each $_key, $_value in u.$radius {
+    --__NS__-radius-#{$_key}: #{$_value};
+  }
+
+  @each $_key, $_value in u.$shadow {
+    --__NS__-shadow-#{$_key}: #{$_value};
+  }
+
+  @each $_key, $_value in u.$transition {
+    --__NS__-duration-#{$_key}: #{$_value};
+  }
+
+  @each $_key, $_value in u.$easing {
+    --__NS__-ease-#{$_key}: #{$_value};
+  }
+
+  --__NS__-glass-fill: #{u.glass('fill')};
+  --__NS__-glass-fill-strong: #{u.glass('fill-strong')};
+  --__NS__-glass-border: #{u.glass('border')};
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --__NS__-duration-fast: 1ms;
+    --__NS__-duration-base: 1ms;
+    --__NS__-duration-slow: 1ms;
+  }
+}

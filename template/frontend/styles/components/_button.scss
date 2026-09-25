@@ -1,0 +1,204 @@
+@use '../utils' as u;
+
+/// Every variant reassigns these; nothing below hardcodes a colour, so a theme
+/// setting can repaint every button by moving the role it points at.
+.__NS__-button {
+  --__NS__-button-bg: transparent;
+  --__NS__-button-fg: #{u.role('text-primary')};
+  --__NS__-button-border: transparent;
+  --__NS__-button-height: #{u.control('height-lg')};
+  --__NS__-button-pad: #{u.control('pad-lg')};
+  --__NS__-button-radius: #{u.radius('pill')};
+  --__NS__-button-shadow: 0 0 #0000;
+
+  @include u.type('button');
+  @include u.transition(background-color, border-color, color, opacity, box-shadow);
+  @include u.focus-ring($halo: false);
+  @include u.touch-target;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: u.fluid(10, 20);
+  min-height: var(--__NS__-button-height);
+  padding-inline: var(--__NS__-button-pad);
+  border: u.rem(1) solid var(--__NS__-button-border);
+  border-radius: var(--__NS__-button-radius);
+  background: var(--__NS__-button-bg);
+  box-shadow: var(--__NS__-button-shadow);
+  color: var(--__NS__-button-fg);
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+
+  // The halo is layered over the variant's own shadow rather than replacing it,
+  // so a focused primary keeps its lift.
+  &:focus-visible {
+    box-shadow: 0 0 0 u.rem(2) u.role('surface-default'), var(--__NS__-button-shadow);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    transition-property: background-color, border-color, color, opacity, box-shadow, scale;
+
+    &:active {
+      scale: 0.99;
+    }
+  }
+}
+
+.__NS__-button__icon {
+  display: block;
+  flex-shrink: 0;
+  width: u.fluid(16, 22);
+  height: auto;
+}
+
+/// Primary is a glass pill: a radial dark-blue wash over a blur, lit by inset
+/// highlights. The inset stack is the lighting, not decoration — dropping it
+/// flattens the button into a plain navy capsule.
+///
+/// The ellipse is Figma's, read off the gradient transform rather than eyeballed:
+/// a radius of 10 through matrix(-9.8212 0.9 -0.6103 -20.072 163.3 25.5) on the
+/// 197 × 60 pill gives 98 × 201px at (163.3, 25.5). Wider than that and the dark
+/// outer stop never arrives — the pill washes out, and the label drops under
+/// 4.5:1 before its last glyph.
+.__NS__-button--primary {
+  --__NS__-button-bg: radial-gradient(
+    49.8% 334.5% at 83% 42.5%,
+    #{rgba(u.hex('blue.600'), 0.72)} 0%,
+    #{rgba(u.hex('blue.700'), 0.77)} 50%,
+    #{rgba(u.hex('blue.800'), 0.82)} 100%
+  );
+  --__NS__-button-fg: #{u.role('text-on-dark')};
+  --__NS__-button-border: #{u.glass('border')};
+  --__NS__-button-shadow: #{u.shadow('control')};
+
+  position: relative;
+  overflow: hidden;
+
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    -webkit-backdrop-filter: blur(#{u.glass('blur-control')});
+    backdrop-filter: blur(#{u.glass('blur-control')});
+  }
+
+  &::after {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow:
+      inset u.rem(3) u.rem(3) u.rem(0.5) u.rem(-3.5) rgba(255, 255, 255, 0.75),
+      inset u.rem(3) u.rem(3) u.rem(0.5) u.rem(-3.5) rgba(255, 255, 255, 0.8),
+      inset u.rem(1) u.rem(1) u.rem(1) u.rem(0.5) rgba(255, 255, 255, 0.75),
+      inset u.rem(-1) u.rem(-1) u.rem(1) u.rem(0.5) rgba(255, 255, 255, 0.75),
+      inset 0 0 u.rem(1) u.rem(1) rgba(255, 255, 255, 0.15),
+      inset 0 0 u.rem(1) u.rem(1) #999999,
+      inset 0 0 u.rem(16) 0 #f2f2f2;
+    content: '';
+    pointer-events: none;
+  }
+
+  &:hover {
+    --__NS__-button-bg: radial-gradient(
+      58% 390% at 50% 50%,
+      #{rgba(u.hex('blue.600'), 0.62)} 0%,
+      #{rgba(u.hex('blue.700'), 0.72)} 50%,
+      #{rgba(u.hex('blue.800'), 0.82)} 100%
+    );
+  }
+
+  &:active {
+    --__NS__-button-bg: radial-gradient(
+      49.8% 334.5% at 83% 42.5%,
+      #{u.hex('blue.600')} 0%,
+      #{u.hex('blue.700')} 50%,
+      #{u.hex('blue.800')} 100%
+    );
+  }
+}
+
+/// The light twin of primary, for dark or photographic backdrops.
+.__NS__-button--glass {
+  --__NS__-button-bg: linear-gradient(
+    90deg,
+    #{rgba(255, 255, 255, 0.72)} 0%,
+    #{rgba(230, 230, 230, 0.82)} 100%
+  );
+  --__NS__-button-fg: #{u.role('text-primary')};
+  --__NS__-button-border: #{u.glass('border')};
+  --__NS__-button-shadow: #{u.shadow('control')};
+
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    -webkit-backdrop-filter: blur(#{u.glass('blur-control')});
+    backdrop-filter: blur(#{u.glass('blur-control')});
+  }
+
+  &:hover,
+  &:active {
+    --__NS__-button-bg: linear-gradient(
+      90deg,
+      #{rgba(255, 255, 255, 1)} 0%,
+      #{rgba(230, 230, 230, 1)} 100%
+    );
+  }
+}
+
+/// Secondary carries no pill at all in the frames — it is the plain word next to
+/// the primary, which is what keeps a two-action row reading as one action and a
+/// way out. It keeps the primary's height so the pair sits on one baseline, and
+/// the underline only arrives on hover, where it says "this is a link".
+.__NS__-button--secondary {
+  --__NS__-button-fg: #{u.role('text-body')};
+  --__NS__-button-pad: #{u.rem(4)};
+
+  gap: u.fluid(8, 10);
+
+  &:hover {
+    text-decoration: underline;
+    text-underline-offset: u.rem(4);
+  }
+
+  &:active {
+    opacity: 0.7;
+  }
+
+  .__NS__-button__icon {
+    width: u.fluid(15, 20);
+  }
+}
+
+.__NS__-button--tertiary {
+  --__NS__-button-height: #{u.control('height-md')};
+  --__NS__-button-pad: #{u.control('pad-md')};
+  --__NS__-button-radius: #{u.radius('sm')};
+
+  font-size: u.fluid(14, 15);
+
+  &:hover {
+    text-decoration: underline;
+    text-underline-offset: u.rem(3);
+  }
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.__NS__-button--full {
+  width: 100%;
+}
+
+.__NS__-button:disabled {
+  cursor: not-allowed;
+}
+
+.__NS__-button--primary:disabled,
+.__NS__-button--glass:disabled {
+  opacity: 0.5;
+}
+
+// Disabled text sits below 4.5:1 by design: WCAG 1.4.3 exempts inactive
+// controls, and lifting it would read as available.
+.__NS__-button--secondary:disabled,
+.__NS__-button--tertiary:disabled {
+  --__NS__-button-fg: #{u.role('text-disabled')};
+}

@@ -1,0 +1,40 @@
+// Sass requires every @use before any other rule, so partials load here.
+// 'utils', 'tokens/*', 'base/*' and 'components/*' resolve through the loadPaths
+// entry in vite.config.js; module partials come in by relative path. Order is
+// load-bearing: tokens must exist before anything reads them, and the Horizon
+// bridge has to land after them.
+@use 'utils' as u;
+@use 'tokens/emit';
+@use 'base/typography';
+@use 'base/horizon-bridge';
+@use 'base/horizon-suppress';
+// `image` is the primitive every other component specialises, so it loads first:
+// a section's own `__image` class has to be able to set a height without losing
+// to `.__NS__-image`, and the placeholder inherits that same class.
+@use 'components/image';
+@use 'components/button';
+@use 'components/card';
+@use 'components/feature-card';
+@use 'components/pagination';
+@use 'components/content-stack';
+@use 'components/heading';
+@use 'components/field';
+@use '../modules/elements/cart-discount/cart-discount';
+@use '../modules/elements/media/media';
+@use '../modules/elements/paginated/paginated';
+@use '../modules/elements/reveal/reveal';
+@use '../modules/elements/sticky-buy/sticky-buy';
+@use '../modules/sections/cart-drawer/cart-drawer';
+@use '../modules/sections/example/example';
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

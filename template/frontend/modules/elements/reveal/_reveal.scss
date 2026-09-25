@@ -1,0 +1,20 @@
+__NS__-reveal {
+  display: block;
+}
+
+/// display: block on a custom element outranks the [hidden] default, which a
+/// tab panel relies on to stay closed.
+__NS__-reveal[hidden] {
+  display: none;
+}
+
+/// Nothing here hides content. The entrance is Motion's, applied as inline
+/// styles by <__NS__-reveal> and removed when it finishes, so a failed bundle,
+/// a hidden tab or a headless render leaves the section fully visible.
+///
+/// What remains is the hardware hint: promoting the moving layers keeps the
+/// stagger smooth on a long page without promoting anything permanently.
+__NS__-reveal [data-reveal],
+__NS__-reveal .__NS__-heading__word-inner {
+  backface-visibility: hidden;
+}
