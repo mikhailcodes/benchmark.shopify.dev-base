@@ -1,0 +1,131 @@
+{%- comment -%}
+  Design: Figma component "Card" (40012052:16062), instanced by Blog posts
+  (40012291:16526) and by every Featured collection frame (40012291:16683) —
+  https://www.figma.com/design/wbLM63qxSnsKERm3WsM2BZ/__NS_TITLE__---eComm---Marketing?node-id=40012291-16683
+
+  Image, eyebrow, title, rule, text, date. One component in the frame, so one
+  snippet here: the blog grid feeds it an article, a Featured collection feeds
+  it either an article or a merchant's own copy, and the card is the same card.
+
+  Pass `article` to take every field from it, or pass the fields directly. A
+  field passed explicitly always wins, so a curated row can keep the article's
+  image and override its title.
+
+  With a link, the title carries a stretched pseudo-element rather than the card
+  being wrapped in an <a>: the link then announces the article title instead of
+  reading the whole card aloud. With no link the title is plain text — nothing
+  is focusable that does not go anywhere.
+
+  A card with no image keeps its full height and shows Shopify's placeholder, so
+  a row never collapses to ragged stumps.
+
+  @param article       {object}  Article to read the fields from. Optional.
+  @param image         {object}  Image. Overrides the article's.
+  @param mobile_image  {object}  Art direction below 768px. Optional — an article has none.
+  @param eyebrow       {string}  Caps line above the title. Overrides the article's first tag.
+  @param title         {string}  Card title. Overrides the article's.
+  @param href          {string}  Link. Overrides the article's URL.
+  @param text          {string}  Body copy under the rule. Overrides the article's excerpt.
+  @param date          {string}  Date. Overrides the article's published date.
+  @param index         {number}  Position in the grid, 1-based. Only the first card can load eagerly.
+  @param section_index {number}  Pass `section.index`. 1 means above the fold.
+  @param show_eyebrow  {boolean} Default true.
+  @param show_text     {boolean} Default true.
+  @param show_date     {boolean} Default true. A card with no date never shows the row.
+  @param heading_tag   {string}  h2 | h3. Default h3.
+{%- endcomment -%}
+
+{%- liquid
+  assign heading_tag = heading_tag | default: 'h3'
+
+  assign card_image = image
+  assign card_eyebrow = eyebrow
+  assign card_title = title
+  assign card_href = href
+  assign card_text = text
+  assign card_date = date
+
+  if article != blank
+    if card_image == blank
+      assign card_image = article.image
+    endif
+    if card_eyebrow == blank
+      assign card_eyebrow = article.tags | first
+    endif
+    if card_title == blank
+      assign card_title = article.title
+    endif
+    if card_href == blank
+      assign card_href = article.url
+    endif
+    if card_text == blank
+      assign card_text = article.excerpt_or_content | strip_html | strip | truncatewords: 24
+    endif
+    if card_date == blank
+      assign card_date = article.published_at
+    endif
+  endif
+
+  comment
+    Only the first card can be the LCP candidate. On a phone the grid is one
+    column, so cards two and three are already below the fold — eager-loading
+    three images there costs bandwidth the visitor has not asked for and
+    delays the one that is actually on screen.
+  endcomment
+  assign image_priority = 'low'
+  if index != blank and index <= 1
+    assign image_priority = ''
+  endif
+-%}
+
+{%- if card_title != blank or card_image != blank -%}
+  <article class="__NS__-feature-card">
+    <div class="__NS__-feature-card__media">
+      {%- liquid
+        assign card_alt = ''
+        if card_title != blank
+          assign card_alt = card_title | append: ' image'
+        endif
+      -%}
+      {%- render '__NS__-image',
+        image: card_image,
+        mobile_image: mobile_image,
+        alt: card_alt,
+        placeholder: 'image',
+        sizes: '(min-width: 1024px) 30vw, (min-width: 768px) 45vw, 92vw',
+        section_index: section_index,
+        priority: image_priority,
+        classes: '__NS__-feature-card__image'
+      -%}
+    </div>
+
+    <div class="__NS__-feature-card__text">
+      {%- if show_eyebrow != false and card_eyebrow != blank -%}
+        <p class="__NS__-eyebrow __NS__-feature-card__tag">{{ card_eyebrow }}</p>
+      {%- endif -%}
+
+      {%- if card_title != blank -%}
+        <{{ heading_tag }} class="__NS__-feature-card__title">
+          {%- if card_href != blank -%}
+            <a class="__NS__-feature-card__link" href="{{ card_href }}">{{ card_title }}</a>
+          {%- else -%}
+            {{ card_title }}
+          {%- endif -%}
+        </{{ heading_tag }}>
+      {%- endif -%}
+
+      {%- if show_text != false and card_text != blank -%}
+        <div class="__NS__-feature-card__excerpt">{{ card_text }}</div>
+      {%- endif -%}
+    </div>
+
+    {%- if show_date != false and card_date != blank -%}
+      <p class="__NS__-feature-card__date">
+        {%- render '__NS__-icon-calendar' -%}
+        <time datetime="{{ card_date | date: '%Y-%m-%d' }}">
+          {{- card_date | date: '%b %-d, %Y' -}}
+        </time>
+      </p>
+    {%- endif -%}
+  </article>
+{%- endif -%}

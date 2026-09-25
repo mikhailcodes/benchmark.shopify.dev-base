@@ -1,0 +1,173 @@
+@use 'sass:color';
+@use 'sass:list';
+@use 'sass:map';
+@use 'sass:math';
+@use 'sass:string';
+
+/// Primitives, straight from the Style Sheet frame. Never referenced by a
+/// component — components read roles, roles read primitives.
+$palette: (
+  'neutral': (
+    'base': #f2ebe6,
+    'white': #f8f7f2,
+    // The panel the frames float a section on: a step warmer than 'white' and a
+    // step lighter than the canvas, so a card can still sit on top of it.
+    'panel': #f7f3f1,
+    // And the card that floats on that panel, one step lighter again.
+    'card': #faf8f7,
+    'pure': #ffffff,
+    'border': #e4dfd9,
+    'rule': #eadfd9,
+    'ink': #020202,
+    'muted': #546e7d,
+    'grey-300': #c8caca,
+    'grey-600': #615e5c,
+    'subtle': #706965,
+    'border-strong': #8a8079,
+    'disabled': #a69d98,
+  ),
+  'blue': (
+    '800': #002639,
+    '700': #0c3648,
+    '600': #174556,
+    '500': #4d6774,
+    '400': #667d88,
+  ),
+  'blush': (
+    'base': #e8d5cd,
+    'accent': #e8637a,
+  ),
+  'sage': (
+    'base': #bfc5bd,
+    'accent': #5e9b6f,
+  ),
+  // The bright stops are Figma's, and they are fill colours: at body size none of
+  // them clear 4.5:1 on the canvas. The -ink stops are the same hues walked down
+  // in lightness until they pass on both the canvas and white, for text and icons.
+  'status': (
+    'success': #5e9b6f,
+    'success-ink': #477554,
+    'warning': #e29a5b,
+    'warning-ink': #9f591c,
+    'error': #e8637a,
+    'error-ink': #d01f3d,
+    'info': #4f86a1,
+    'info-ink': #427187,
+  ),
+);
+
+/// Roles. This is the tier a theme setting or a dark section swaps.
+$roles: (
+  'text-primary': ('blue', '800'),
+  'text-body': ('neutral', 'ink'),
+  'text-muted': ('neutral', 'muted'),
+  'text-copy': ('neutral', 'grey-600'),
+  'text-subtle': ('neutral', 'subtle'),
+  'text-disabled': ('neutral', 'disabled'),
+  'text-on-dark': ('neutral', 'base'),
+  'text-eyebrow': ('blue', '500'),
+  'text-wordmark': ('neutral', 'grey-300'),
+  'action-primary': ('blue', '800'),
+  'action-primary-mid': ('blue', '700'),
+  'action-primary-light': ('blue', '600'),
+  'accent': ('blush', 'accent'),
+  'accent-soft': ('blush', 'base'),
+  'sage': ('sage', 'accent'),
+  'sage-soft': ('sage', 'base'),
+  'background-canvas': ('neutral', 'base'),
+  'background-raised': ('neutral', 'white'),
+  'surface-default': ('neutral', 'pure'),
+  'surface-panel': ('neutral', 'panel'),
+  'surface-card': ('neutral', 'card'),
+  'border-default': ('neutral', 'border'),
+  'border-rule': ('neutral', 'rule'),
+  'border-strong': ('neutral', 'border-strong'),
+  'focus-ring': ('blue', '800'),
+  'status-success': ('status', 'success'),
+  'status-warning': ('status', 'warning'),
+  'status-error': ('status', 'error'),
+  'status-info': ('status', 'info'),
+  'text-success': ('status', 'success-ink'),
+  'text-warning': ('status', 'warning-ink'),
+  'text-error': ('status', 'error-ink'),
+  'text-info': ('status', 'info-ink'),
+);
+
+@function _split-key($key) {
+  $_dot: string.index($key, '.');
+
+  @if not $_dot {
+    @error 'Colour key "#{$key}" must be "family.stop", e.g. "blue.800".';
+  }
+
+  @return (
+    'family': string.slice($key, 1, $_dot - 1),
+    'stop': string.slice($key, $_dot + 1)
+  );
+}
+
+/// hex('blue.800') -> #002639. For colour maths and rgba() only.
+@function hex($key) {
+  $_parts: _split-key($key);
+  $_family: map.get($palette, map.get($_parts, 'family'));
+
+  @if not $_family {
+    @error 'Unknown colour family in "#{$key}". Available: #{map.keys($palette)}.';
+  }
+
+  $_value: map.get($_family, map.get($_parts, 'stop'));
+
+  @if not $_value {
+    @error 'Unknown stop in "#{$key}". Available: #{map.keys($_family)}.';
+  }
+
+  @return $_value;
+}
+
+/// shade('blush.base', 8%) -> the stop with 8% of the ink mixed in. For the
+/// pressed states of a fill the palette carries only one stop of. Channels are
+/// rounded, otherwise a mix compiles to a percentage triple.
+@function shade($key, $weight, $ink: 'blue.800') {
+  $_mixed: color.mix(hex($ink), hex($key), $weight);
+
+  @return rgb(
+    math.round(color.channel($_mixed, 'red')),
+    math.round(color.channel($_mixed, 'green')),
+    math.round(color.channel($_mixed, 'blue'))
+  );
+}
+
+/// color('blue.800') -> var(--__NS__-color-blue-800)
+@function color($key) {
+  $_parts: _split-key($key);
+
+  @return var(--__NS__-color-#{map.get($_parts, 'family')}-#{map.get($_parts, 'stop')});
+}
+
+/// role('text-primary') -> var(--__NS__-text-primary)
+@function role($key) {
+  @if not map.has-key($roles, $key) {
+    @error 'Unknown role "#{$key}". Available: #{map.keys($roles)}.';
+  }
+
+  @return var(--__NS__-#{$key});
+}
+
+/// Literal value behind a role, for rgba() and gradients.
+@function role-hex($key) {
+  $_target: map.get($roles, $key);
+
+  @if not $_target {
+    @error 'Unknown role "#{$key}". Available: #{map.keys($roles)}.';
+  }
+
+  @return map.get(map.get($palette, list.nth($_target, 1)), list.nth($_target, 2));
+}
+
+/// Horizon keeps parallel *-rgb variables for rgba() maths, and they expect bare
+/// channels: "0, 38, 57".
+@function channels($role) {
+  $_value: role-hex($role);
+
+  @return string.unquote('#{color.channel($_value, "red", $space: rgb)}, #{color.channel($_value, "green", $space: rgb)}, #{color.channel($_value, "blue", $space: rgb)}');
+}

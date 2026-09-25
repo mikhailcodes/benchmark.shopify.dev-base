@@ -1,0 +1,36 @@
+@use 'sass:list';
+@use 'sass:math';
+@use 'sass:meta';
+
+$base-font-size: 16 !default;
+
+@function strip-unit($value) {
+  @if meta.type-of($value) == 'number' and not math.is-unitless($value) {
+    @return math.div($value, ($value * 0 + 1));
+  }
+
+  @return $value;
+}
+
+/// rem(16) -> 1rem. Accepts a list: rem(16 24) -> 1rem 1.5rem.
+@function rem($values) {
+  $result: ();
+
+  @each $value in $values {
+    @if meta.type-of($value) == 'number' {
+      $value: math.div(strip-unit($value), $base-font-size) * 1rem;
+    }
+
+    $result: list.append($result, $value);
+  }
+
+  @if list.length($result) == 1 {
+    @return list.nth($result, 1);
+  }
+
+  @return $result;
+}
+
+@function rem-calc($values) {
+  @return rem($values);
+}

@@ -1,0 +1,540 @@
+@use 'utils' as u;
+
+// Liquid Ajax Cart's own tags, which the library registers but never styles.
+ajax-cart-product-form,
+ajax-cart-quantity {
+  display: block;
+}
+
+// The panel inside is position:fixed, so the tag itself contributes no box —
+// but a custom element defaults to inline, and an inline box around a dialog
+// is the kind of thing that only breaks once something else changes.
+__NS__-cart-drawer {
+  display: block;
+}
+
+.__NS__-cart-drawer__panel {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: u.z('modal');
+  width: min(100%, #{u.rem(480)});
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  color: u.role('text-primary');
+  background: u.role('background-raised');
+  border: 0;
+  box-shadow: u.shadow('raised');
+
+  &::backdrop {
+    background: rgba(u.hex('blue.800'), 0.32);
+  }
+
+  // The layout only exists while the dialog is open. A `display` on the element
+  // itself beats the UA's `display: none` for a closed <dialog>, which left the
+  // drawer sitting open on first paint with no one having asked for it.
+  &[open] {
+    display: flex;
+    animation: __NS__-cart-drawer-in u.duration('base') u.easing('out');
+  }
+
+  &[open]::backdrop {
+    animation: __NS__-cart-drawer-backdrop-in u.duration('base') u.easing('out');
+  }
+}
+
+.__NS__-cart-drawer.is-closing .__NS__-cart-drawer__panel {
+  animation: __NS__-cart-drawer-out u.duration('fast') u.easing('in-out') forwards;
+
+  &::backdrop {
+    animation: __NS__-cart-drawer-backdrop-out u.duration('fast') u.easing('in-out') forwards;
+  }
+}
+
+@keyframes __NS__-cart-drawer-in {
+  from {
+    transform: translate3d(100%, 0, 0);
+  }
+
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes __NS__-cart-drawer-out {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+@keyframes __NS__-cart-drawer-backdrop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes __NS__-cart-drawer-backdrop-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+// An empty animation list resolves immediately, which is what lets the element
+// close instantly here rather than wait on a promise that never settles.
+@media (prefers-reduced-motion: reduce) {
+  .__NS__-cart-drawer__panel[open],
+  .__NS__-cart-drawer__panel[open]::backdrop,
+  .__NS__-cart-drawer.is-closing .__NS__-cart-drawer__panel,
+  .__NS__-cart-drawer.is-closing .__NS__-cart-drawer__panel::backdrop {
+    animation: none;
+  }
+}
+
+.__NS__-cart-drawer__inner {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: u.fluid(20, 55) u.fluid(20, 55) 0;
+}
+
+.__NS__-cart-drawer__header {
+  display: flex;
+  gap: u.space('md');
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-bottom: u.space('md');
+  border-bottom: 1px solid u.role('border-rule');
+}
+
+.__NS__-cart-drawer__title {
+  @include u.type('h3');
+
+  display: flex;
+  flex-wrap: wrap;
+  gap: u.space('sm');
+  align-items: baseline;
+  margin: 0;
+}
+
+.__NS__-cart-drawer__count {
+  @include u.type('caption');
+
+  color: u.role('text-muted');
+}
+
+.__NS__-cart-drawer__close {
+  @include u.focus-ring;
+
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: u.control('touch-target');
+  height: u.control('touch-target');
+  // The glyph reads as inset against the header rule without this; the touch
+  // target keeps its full size.
+  margin: #{u.rem(-10)} #{u.rem(-10)} 0 0;
+  color: u.role('text-primary');
+  cursor: pointer;
+  background: none;
+  border: 0;
+
+  @include u.transition(opacity);
+
+  &:hover {
+    opacity: 0.6;
+  }
+}
+
+.__NS__-cart-drawer__items {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: u.space('md');
+  min-height: 0;
+  padding: u.space('md') 0;
+  margin: 0;
+  overflow-y: auto;
+  list-style: none;
+  overscroll-behavior: contain;
+}
+
+.__NS__-cart-drawer__error:not(:empty) {
+  @include u.type('body-s');
+
+  padding: u.space('sm') 0;
+  color: u.role('status-error');
+}
+
+.__NS__-cart-drawer__footer {
+  display: flex;
+  flex-direction: column;
+  gap: u.space('sm');
+  padding: u.space('md') 0 u.space('lg');
+}
+
+.__NS__-cart-drawer__continue {
+  margin: 0;
+  text-align: center;
+}
+
+.__NS__-cart-drawer__continue-link {
+  @include u.focus-ring;
+  @include u.type('body-s');
+
+  padding: u.space('xs');
+  color: u.role('text-muted');
+  text-decoration: underline;
+  cursor: pointer;
+  background: none;
+  border: 0;
+
+  @include u.transition(color);
+
+  &:hover {
+    color: u.role('text-primary');
+  }
+}
+
+.__NS__-cart-trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: u.space('sm') u.space('md');
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.__NS__-cart-trust__item {
+  @include u.type('caption');
+
+  color: u.role('text-subtle');
+}
+
+// Empty state — Figma 40012291:16305. Structure only; the frame is a
+// screenshot of a stock demo store, so colour and type are __NS_TITLE__'s.
+.__NS__-cart-drawer__empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: u.space('md');
+  align-items: center;
+  justify-content: center;
+  padding: u.space('xl') 0;
+  text-align: center;
+}
+
+.__NS__-cart-drawer__empty-icon {
+  position: relative;
+  display: block;
+  color: u.role('text-primary');
+}
+
+.__NS__-cart-drawer__empty-badge {
+  @include u.type('caption');
+
+  position: absolute;
+  top: u.rem(-10);
+  right: u.rem(-14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: u.rem(20);
+  height: u.rem(20);
+  padding: 0 u.rem(6);
+  color: u.role('text-on-dark');
+  background: u.role('action-primary');
+  border-radius: u.radius('full');
+}
+
+.__NS__-cart-drawer__empty-title {
+  @include u.type('h3');
+
+  margin: 0;
+}
+
+.__NS__-cart-drawer__empty-body {
+  @include u.type('body-s');
+
+  max-width: u.rem(280);
+  margin: 0;
+  color: u.role('text-copy');
+}
+
+// One cart line
+
+.__NS__-cart-line {
+  display: flex;
+  gap: u.space('md');
+}
+
+.__NS__-cart-line__media {
+  flex: none;
+  width: u.rem(88);
+  overflow: hidden;
+  border-radius: u.radius('xs');
+}
+
+.__NS__-cart-line__image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.__NS__-cart-line__image--empty {
+  aspect-ratio: 1;
+  background: u.glass('fill-weak');
+}
+
+.__NS__-cart-line__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: u.space('sm');
+  min-width: 0;
+}
+
+.__NS__-cart-line__head {
+  display: flex;
+  gap: u.space('sm');
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.__NS__-cart-line__text {
+  display: flex;
+  flex-direction: column;
+  gap: u.rem(2);
+  min-width: 0;
+}
+
+.__NS__-cart-line__title {
+  @include u.focus-ring;
+  @include u.type('label');
+
+  color: u.role('text-primary');
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.__NS__-cart-line__variant {
+  @include u.type('caption');
+
+  color: u.role('text-muted');
+}
+
+.__NS__-cart-line__discount {
+  @include u.type('caption');
+
+  color: u.role('status-success');
+}
+
+.__NS__-cart-line__price {
+  @include u.type('label');
+
+  flex: none;
+  margin: 0;
+  text-align: right;
+}
+
+.__NS__-cart-line__price-was {
+  display: block;
+  color: u.role('text-disabled');
+}
+
+.__NS__-cart-line__controls {
+  display: flex;
+  gap: u.space('md');
+  align-items: center;
+  justify-content: space-between;
+}
+
+.__NS__-cart-line__remove {
+  @include u.focus-ring;
+  @include u.type('caption');
+
+  color: u.role('text-muted');
+  text-decoration: underline;
+
+  @include u.transition(color);
+
+  &:hover {
+    color: u.role('text-primary');
+  }
+}
+
+.__NS__-cart-line__error:not(:empty) {
+  @include u.type('caption');
+
+  color: u.role('status-error');
+}
+
+.__NS__-stepper {
+  display: flex;
+  align-items: center;
+  border: 1px solid u.role('border-default');
+  border-radius: u.radius('full');
+}
+
+.__NS__-stepper__button {
+  @include u.focus-ring($offset: -2px);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: u.rem(32);
+  height: u.rem(32);
+  color: u.role('text-primary');
+
+  @include u.transition(opacity);
+
+  &[aria-disabled='true'] {
+    pointer-events: none;
+    opacity: 0.35;
+  }
+
+  &:hover {
+    opacity: 0.6;
+  }
+}
+
+.__NS__-stepper__count {
+  @include u.focus-ring($offset: -2px);
+  @include u.type('label');
+
+  width: u.rem(32);
+  padding: 0;
+  color: u.role('text-primary');
+  text-align: center;
+  background: none;
+  border: 0;
+
+  // The design draws no spin buttons, and the two controls either side already
+  // step the value.
+  appearance: textfield;
+
+  &::-webkit-inner-spin-button,
+  &::-webkit-outer-spin-button {
+    appearance: none;
+  }
+}
+
+// Summary
+
+.__NS__-cart-summary {
+  display: flex;
+  flex-direction: column;
+  gap: u.space('sm');
+  padding: u.space('md') 0;
+  border-top: 1px solid u.role('border-rule');
+}
+
+.__NS__-cart-summary__row {
+  @include u.type('body-s');
+
+  display: flex;
+  gap: u.space('md');
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.__NS__-cart-summary__row--discount {
+  color: u.role('status-success');
+}
+
+.__NS__-cart-summary__row--muted {
+  color: u.role('text-muted');
+}
+
+.__NS__-cart-summary__row--total {
+  @include u.type('h4');
+
+  padding-top: u.space('sm');
+  border-top: 1px solid u.role('border-rule');
+}
+
+// Free shipping progress
+
+.__NS__-cart-goal {
+  display: flex;
+  flex-direction: column;
+  gap: u.space('sm');
+  padding: u.space('md') 0;
+  border-bottom: 1px solid u.role('border-rule');
+}
+
+.__NS__-cart-goal__text {
+  @include u.type('body-s');
+
+  margin: 0;
+  color: u.role('text-copy');
+}
+
+.__NS__-cart-goal__amount {
+  color: u.role('text-primary');
+}
+
+.__NS__-cart-goal__track {
+  height: u.rem(6);
+  overflow: hidden;
+  background: u.role('border-default');
+  border-radius: u.radius('full');
+}
+
+.__NS__-cart-goal__fill {
+  @include u.transition(transform);
+
+  display: block;
+  height: 100%;
+  background: u.role('action-primary');
+  border-radius: inherit;
+  transform: scaleX(var(--__NS__-cart-goal, 0));
+  transform-origin: left center;
+}
+
+// Order note
+
+.__NS__-cart-note {
+  // See __NS__-cart-discount: .__NS__-field__control needs its wrapper to declare
+  // these, and the <details> is the wrapper here.
+  --__NS__-field-height: #{u.control('height-md')};
+  --__NS__-field-border: #{u.role('border-default')};
+
+  padding: u.space('md') 0;
+  border-top: 1px solid u.role('border-rule');
+}
+
+.__NS__-cart-note__summary {
+  @include u.focus-ring;
+  @include u.type('body-s');
+
+  color: u.role('text-muted');
+  cursor: pointer;
+}
+
+.__NS__-cart-note__input {
+  width: 100%;
+  margin-top: u.space('sm');
+  resize: vertical;
+}
+
+

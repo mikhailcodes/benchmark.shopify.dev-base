@@ -1,0 +1,102 @@
+@use 'utils' as u;
+
+/// Figma node 40012293:18575. The pills share the button system's geometry but
+/// not its markup — page numbers are 48px circles, and a disabled end is a span.
+.__NS__-pagination {
+  --__NS__-pagination-size: #{u.fluid(40, 48)};
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: u.fluid(8, 12);
+}
+
+.__NS__-pagination__pages {
+  display: flex;
+  align-items: center;
+  gap: u.fluid(8, 12);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.__NS__-pagination__item {
+  display: flex;
+}
+
+.__NS__-pagination__step,
+.__NS__-pagination__page {
+  @include u.type('button');
+  @include u.transition(background-color, color, opacity);
+  @include u.focus-ring($halo: false);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--__NS__-pagination-size);
+  border-radius: u.radius('full');
+  background-color: rgba(u.hex('blue.800'), 0.05);
+  color: u.role('text-primary');
+  text-decoration: none;
+
+  &:hover {
+    background-color: rgba(u.hex('blue.800'), 0.1);
+  }
+}
+
+.__NS__-pagination__step {
+  padding-inline: u.fluid(16, 24);
+  min-width: u.fluid(112, 140);
+}
+
+.__NS__-pagination__page {
+  width: var(--__NS__-pagination-size);
+  padding-inline: u.rem(4);
+}
+
+/// Next is the forward action, so it carries the primary fill; the current page
+/// gets the same weight to read as "you are here".
+.__NS__-pagination__step--next,
+.__NS__-pagination__page--current {
+  background-color: u.role('action-primary');
+  color: u.role('text-on-dark');
+
+  &:hover {
+    background-color: u.role('action-primary-mid');
+  }
+}
+
+.__NS__-pagination__step--disabled {
+  color: u.role('text-disabled');
+  cursor: not-allowed;
+}
+
+.__NS__-pagination__step--next.__NS__-pagination__step--disabled {
+  background-color: rgba(u.hex('blue.800'), 0.05);
+}
+
+.__NS__-pagination__gap {
+  @include u.type('body');
+
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--__NS__-pagination-size);
+  color: u.role('text-subtle');
+}
+
+/// A phone has no room for ten circles beside two 140px pills, so the steps take
+/// the full row and the numbers wrap under them.
+@include u.max('sm') {
+  .__NS__-pagination__step {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .__NS__-pagination__pages {
+    order: 1;
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}

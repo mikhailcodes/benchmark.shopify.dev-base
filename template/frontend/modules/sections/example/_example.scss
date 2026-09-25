@@ -1,0 +1,18 @@
+@use 'utils' as u;
+
+__NS__-example {
+  display: block;
+  padding: u.space('xl') u.layout('page-margin');
+}
+
+.__NS__-example__heading {
+  @include u.type('h2');
+
+  margin: 0 0 u.space('sm');
+}
+
+.__NS__-example__body {
+  display: grid;
+  gap: u.space('sm');
+  justify-items: start;
+}

@@ -1,0 +1,40 @@
+@use 'utils' as u;
+
+/// Word-level entrance for the heading snippet. The mask is the outer span and
+/// the travel is the inner one, so the words rise out of the line rather than
+/// sliding across it. Overflow on an inline-block clips descenders, which the
+/// padding and the negative margin give back.
+.__NS__-heading__line {
+  display: block;
+}
+
+.__NS__-heading__word {
+  display: inline-block;
+  padding-bottom: 0.15em;
+  margin-bottom: -0.15em;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+.__NS__-heading__word-inner {
+  display: inline-block;
+}
+
+/// Plantin ships a real italic at 300, which is the weight `display` and `h1`
+/// use — the sizes the frames put an emphasis run on. Heavier steps would have
+/// to synthesise the slant, so keep the emphasis on a headline, not a subhead.
+.__NS__-heading__emphasis {
+  font-style: italic;
+}
+
+/// The wordmark band. The frames set it at 200 on a 1440 artboard and let it run
+/// 2189 wide inside a 1360 frame — it is meant to overflow, so it never wraps and
+/// the section clips it at the viewport rather than growing a scrollbar.
+///
+/// The colour is a solid token rather than a wash: an opacity resolves against
+/// whatever surface the band happens to sit on, so the same wordmark would come
+/// out one value on the canvas and another on a panel.
+.__NS__-type-wordmark {
+  color: u.role('text-wordmark');
+  white-space: nowrap;
+}

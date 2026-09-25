@@ -1,0 +1,94 @@
+{%- comment -%}
+  Renders a heading and, when asked, splits it so it can rise into place a word
+  at a time. Line breaks in the text are kept — that is how a designer's two-line
+  headline stays two lines without a viewport guess.
+
+  The motion itself belongs to the nearest <__NS__-reveal>: nothing here animates
+  until that element arms it, so a failed bundle leaves plain, readable text.
+
+  The gap between two words is `{{ ' ' }}` and not a literal space, because
+  Shopify drops a whitespace-only run between tags and the words then render
+  joinedtogetherlikethis. An output node is not whitespace, so it survives.
+
+  `emphasis` is the italic run the frames put on a headline. By default it joins
+  the last line — "articles *that we love*" — so the emphasis is a change of
+  voice and not a change of layout. `emphasis_line` makes it a line of its own
+  instead, which is how the frames set a headline whose whole second line is
+  italic. Either way its words rise with the rest.
+
+  The emphasis markup is captured once rather than written out in each branch:
+  it is the same run whether it sits inline or on its own line, and whether the
+  heading animates or not.
+
+  @param text           {string}  Heading copy. Newlines become lines. Required.
+  @param emphasis       {string}  Italic run. Optional.
+  @param emphasis_line  {boolean} Give the emphasis its own line. Default false.
+  @param tag            {string}  h1 | h2 | h3 | p. Default h2.
+  @param size           {string}  Type step, e.g. 'display-xl'. Default 'display'.
+  @param animation      {string}  'rise' splits into words, anything else renders flat.
+  @param classes        {string}  Extra classes.
+  @param attrs          {string}  Raw attributes, e.g. block.shopify_attributes.
+{%- endcomment -%}
+
+{%- if text != blank -%}
+  {%- liquid
+    assign tag = tag | default: 'h2'
+    assign size = size | default: 'display'
+
+    assign heading_class = '__NS__-heading __NS__-type-' | append: size
+    if classes != blank
+      assign heading_class = heading_class | append: ' ' | append: classes
+    endif
+
+    assign lines = text | escape | strip | newline_to_br | split: '<br />'
+    assign emphasis_words = emphasis | escape | strip | split: ' '
+
+    assign emphasis_inline = false
+    if emphasis != blank and emphasis_line != true
+      assign emphasis_inline = true
+    endif
+  -%}
+
+  {%- capture emphasis_markup -%}
+    {%- if emphasis != blank -%}
+      <em class="__NS__-heading__emphasis">
+        {%- if animation == 'rise' -%}
+          {%- for word in emphasis_words -%}
+            <span class="__NS__-heading__word">
+              <span class="__NS__-heading__word-inner">{{ word }}</span>
+            </span>
+            {%- unless forloop.last -%}{{ ' ' }}{%- endunless -%}
+          {%- endfor -%}
+        {%- else -%}
+          {{- emphasis | escape | strip -}}
+        {%- endif -%}
+      </em>
+    {%- endif -%}
+  {%- endcapture -%}
+
+  <{{ tag }} class="{{ heading_class }}" data-reveal {{ attrs }}>
+    {%- for line in lines -%}
+      <span class="__NS__-heading__line">
+        {%- if animation == 'rise' -%}
+          {%- assign words = line | strip | split: ' ' -%}
+          {%- for word in words -%}
+            <span class="__NS__-heading__word">
+              <span class="__NS__-heading__word-inner">{{ word }}</span>
+            </span>
+            {%- unless forloop.last -%}{{ ' ' }}{%- endunless -%}
+          {%- endfor -%}
+        {%- else -%}
+          {{- line | strip -}}
+        {%- endif -%}
+
+        {%- if forloop.last and emphasis_inline -%}
+          {{ ' ' }}{{ emphasis_markup }}
+        {%- endif -%}
+      </span>
+    {%- endfor -%}
+
+    {%- if emphasis != blank and emphasis_line -%}
+      <span class="__NS__-heading__line">{{ emphasis_markup }}</span>
+    {%- endif -%}
+  </{{ tag }}>
+{%- endif -%}

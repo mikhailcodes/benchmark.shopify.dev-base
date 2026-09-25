@@ -1,0 +1,48 @@
+@use 'utils' as u;
+
+/// The block vocabulary any section can stack: __NS__-eyebrow, __NS__-heading,
+/// __NS__-text, __NS__-cta. The section owns where the stack sits and how wide it
+/// runs; this owns how the blocks behave inside it.
+///
+/// The rhythm scales with the type it separates. A fixed 16 holds a 40px heading
+/// apart on a phone and the same 16 holds a 64px one apart on a desktop, which
+/// reads as the stack tightening as the page grows. 20 is the figure the frames
+/// draw between blocks.
+.__NS__-content-stack {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: u.fluid(14, 20);
+  column-gap: u.fluid(10, 16);
+  justify-content: var(--__NS__-stack-justify, center);
+  text-align: var(--__NS__-stack-text-align, center);
+}
+
+/// Every block is its own row, except buttons: consecutive ones share a line
+/// and wrap together, which is what makes a button row possible without a
+/// wrapper block.
+.__NS__-content__item {
+  flex: 0 0 100%;
+  margin: 0;
+}
+
+.__NS__-content__cta {
+  flex: 0 0 auto;
+}
+
+.__NS__-content__text > :last-child {
+  margin-bottom: 0;
+}
+
+/// Show-on, from the block's own setting. Hiding a block is a merchant decision
+/// per breakpoint, not a second copy of the section.
+@include u.max('md') {
+  .__NS__-content__item[data-visible-on='desktop'] {
+    display: none;
+  }
+}
+
+@include u.min('md') {
+  .__NS__-content__item[data-visible-on='mobile'] {
+    display: none;
+  }
+}

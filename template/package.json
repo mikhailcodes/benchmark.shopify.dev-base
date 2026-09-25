@@ -1,0 +1,45 @@
+{
+  "name": "__PACKAGE__",
+  "version": "1.0.0",
+  "type": "module",
+  "packageManager": "yarn@4.18.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "run-s -s \"clean\" \"dev:serve\" --",
+    "dev:serve": "run-p -sr \"shopify:dev\" \"vite:dev\" --",
+    "build": "run-s -s \"clean\" \"vite:build\" --",
+    "deploy": "run-s \"build\" \"push\" --",
+    "push": "shopify theme push --environment development",
+    "pull": "shopify theme pull --environment development",
+    "push:qa": "shopify theme push --environment qa",
+    "pull:qa": "shopify theme pull --environment qa",
+    "shopify:dev": "shopify theme dev --environment development --live-reload=hot-reload --port=${SHOPIFY_PORT:-9292}",
+    "vite:dev": "vite --port ${VITE_PORT:-5173}",
+    "vite:build": "vite build",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint frontend",
+    "check:boundary": "node tools/check-horizon-boundary.mjs",
+    "clean": "node tools/clean-assets.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "@types/node": "^22.20.2",
+    "@typescript-eslint/eslint-plugin": "^8.70.0",
+    "@typescript-eslint/parser": "^8.70.0",
+    "autoprefixer": "^10.6.0",
+    "eslint": "^9",
+    "globals": "^17.12.0",
+    "npm-run-all": "^4.1.5",
+    "postcss": "^8.5.28",
+    "sass": "^1.104.1",
+    "typescript": "^5",
+    "vite": "^8.3.0",
+    "vite-plugin-shopify": "^5.0.0"
+  },
+  "dependencies": {
+    "liquid-ajax-cart": "^2.2.0",
+    "motion": "^13.4.0"
+  }
+}

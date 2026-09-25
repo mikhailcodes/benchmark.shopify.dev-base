@@ -1,0 +1,153 @@
+{%- comment -%}
+  One optional drawer module, chosen by block type.
+
+  @param block         {block}   The section block. Required.
+  @param checkout_form {string}  Id of the drawer's checkout form. Required for
+                                 the note module.
+
+  Rendered from both the top and bottom regions of the drawer, so the section
+  loops over section.blocks twice and never repeats this markup.
+{%- endcomment -%}
+
+{%- case block.type -%}
+  {%- when 'shipping_goal' -%}
+    {%- liquid
+      assign threshold = block.settings.threshold | times: 100
+      assign remaining = threshold | minus: cart.total_price
+
+      assign goal_percent = 0
+      if threshold > 0
+        assign goal_percent = cart.total_price | times: 100.0 | divided_by: threshold | round
+        assign goal_percent = goal_percent | at_most: 100
+      endif
+    -%}
+
+    {%- if threshold > 0 -%}
+      <div class="__NS__-cart-goal" {{ block.shopify_attributes }}>
+        <p class="__NS__-cart-goal__text">
+          {%- if remaining > 0 -%}
+            {%- capture amount -%}
+              <strong class="__NS__-cart-goal__amount">{{ remaining | money }}</strong>
+            {%- endcapture -%}
+            {{ block.settings.message | replace: '[amount]', amount }}
+          {%- else -%}
+            {{ block.settings.reached_message }}
+          {%- endif -%}
+        </p>
+
+        {%- comment -%}
+          A div rather than <progress>: the native element cannot be styled to
+          the token palette without a vendor-prefixed rule per engine, and the
+          ARIA role carries the same information to a screen reader.
+        {%- endcomment -%}
+        <div
+          class="__NS__-cart-goal__track"
+          role="progressbar"
+          aria-valuenow="{{ goal_percent }}"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-label="{{ 'Progress towards free shipping' | escape }}"
+        >
+          <span class="__NS__-cart-goal__fill" style="--__NS__-cart-goal: {{ goal_percent | divided_by: 100.0 }}"></span>
+        </div>
+      </div>
+    {%- endif -%}
+
+  {%- when 'discount' -%}
+    {%- comment -%}
+      Shopify has no "add one code" endpoint: /cart/update takes the whole list,
+      so applying and removing are both a rewrite of it. __NS__-cart-discount
+      reads the current codes off the pills below rather than holding a second
+      copy of the truth.
+    {%- endcomment -%}
+    {%- capture discount_config -%}
+{"invalidMessage": {{ block.settings.invalid_message | json }}}
+    {%- endcapture -%}
+
+    <__NS__-cart-discount
+      class="__NS__-cart-discount"
+      data-config="{{ discount_config | escape }}"
+      {{ block.shopify_attributes }}
+    >
+      <label class="__NS__-cart-discount__label" for="__NS__-cart-discount-input">
+        {{- block.settings.label | escape -}}
+      </label>
+
+      <div class="__NS__-cart-discount__row">
+        <input
+          class="__NS__-field__control __NS__-cart-discount__input"
+          id="__NS__-cart-discount-input"
+          type="text"
+          name="discount"
+          autocomplete="off"
+          autocapitalize="characters"
+          spellcheck="false"
+          placeholder="{{ block.settings.placeholder | escape }}"
+          data-ref="discount-input"
+        >
+
+        {%- render '__NS__-button',
+          label: block.settings.apply_label,
+          variant: 'secondary',
+          classes: '__NS__-cart-discount__apply',
+          attrs: 'data-ref="discount-apply"'
+        -%}
+      </div>
+
+      {%- comment -%}
+        Only the applicable codes. Shopify answers 200 for a code it rejects and
+        keeps it in cart.discount_codes with applicable false, so rendering the
+        whole list would show a pill for a discount that is not applied — and
+        would tell __NS__-cart-discount the code succeeded.
+      {%- endcomment -%}
+      {%- assign live_codes = cart.discount_codes | where: 'applicable' -%}
+      {%- if live_codes.size > 0 -%}
+        <ul class="__NS__-cart-discount__pills">
+          {%- for discount in live_codes -%}
+            <li class="__NS__-cart-discount__pill">
+              <span class="__NS__-cart-discount__code">{{ discount.code | escape }}</span>
+              <button
+                class="__NS__-cart-discount__remove"
+                type="button"
+                data-ref="discount-remove"
+                data-code="{{ discount.code | escape }}"
+                aria-label="{{ 'Remove discount ' | append: discount.code | escape }}"
+              >
+                {%- render '__NS__-icon-close' -%}
+              </button>
+            </li>
+          {%- endfor -%}
+        </ul>
+      {%- endif -%}
+
+      <p class="__NS__-cart-discount__error" data-ref="discount-error" role="status" aria-live="polite"></p>
+    </__NS__-cart-discount>
+
+  {%- when 'note' -%}
+    {%- comment -%}
+      Two mechanisms, because neither is sufficient alone.
+
+      data-ajax-cart-property-input takes the property name from `name` and
+      saves on change — that is blur or Ctrl+Enter, not every keystroke, so a
+      shopper who types and immediately hits checkout can outrun it.
+
+      The form attribute closes that gap: it associates the textarea with the
+      checkout form further down, which is outside this element in the DOM. The
+      note then posts natively with the checkout whatever the ajax save did, and
+      it still works with JavaScript off.
+    {%- endcomment -%}
+    <details class="__NS__-cart-note" {% if cart.note != blank %}open{% endif %} {{ block.shopify_attributes }}>
+      <summary class="__NS__-cart-note__summary">{{ block.settings.label | escape }}</summary>
+
+      <label class="visually-hidden" for="__NS__-cart-note-input">{{ block.settings.label | escape }}</label>
+      <textarea
+        class="__NS__-field__control __NS__-cart-note__input"
+        id="__NS__-cart-note-input"
+        name="note"
+        rows="3"
+        placeholder="{{ block.settings.placeholder | escape }}"
+        form="{{ checkout_form }}"
+        data-ajax-cart-property-input
+      >{{ cart.note | escape }}</textarea>
+    </details>
+{%- endcase -%}

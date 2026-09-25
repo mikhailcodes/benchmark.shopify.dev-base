@@ -1,0 +1,54 @@
+{%- comment -%}
+  Design: Figma node 40012293:18575 (Pagination) —
+  https://www.figma.com/design/wbLM63qxSnsKERm3WsM2BZ/__NS_TITLE__---eComm---Marketing?node-id=40012293-18547
+
+  Previous / page numbers / Next, as Shopify's `paginate.parts` gives them. The
+  ends render as spans rather than disabled links: a link with no destination is
+  still focusable and still followable.
+
+  @param paginate {object} The `paginate` object. Required.
+{%- endcomment -%}
+
+{%- if paginate.pages > 1 -%}
+  <nav class="__NS__-pagination" aria-label="{{ 'content.pagination.nav_label' | t }}">
+    {%- if paginate.previous.is_link -%}
+      <a class="__NS__-pagination__step" href="{{ paginate.previous.url }}" rel="prev">
+        {{- 'content.pagination.previous' | t -}}
+      </a>
+    {%- else -%}
+      <span class="__NS__-pagination__step __NS__-pagination__step--disabled">{{ 'content.pagination.previous' | t }}</span>
+    {%- endif -%}
+
+    <ol class="__NS__-pagination__pages">
+      {%- for part in paginate.parts -%}
+        <li class="__NS__-pagination__item">
+          {%- if part.is_link -%}
+            <a
+              class="__NS__-pagination__page"
+              href="{{ part.url }}"
+              aria-label="{{ 'content.pagination.page' | t: page: part.title }}"
+            >
+              {{- part.title -}}
+            </a>
+          {%- elsif part.title == '&hellip;' -%}
+            <span class="__NS__-pagination__gap" aria-hidden="true">{{ part.title }}</span>
+          {%- else -%}
+            <span class="__NS__-pagination__page __NS__-pagination__page--current" aria-current="page">
+              {{- part.title -}}
+            </span>
+          {%- endif -%}
+        </li>
+      {%- endfor -%}
+    </ol>
+
+    {%- if paginate.next.is_link -%}
+      <a class="__NS__-pagination__step __NS__-pagination__step--next" href="{{ paginate.next.url }}" rel="next">
+        {{- 'content.pagination.next' | t -}}
+      </a>
+    {%- else -%}
+      <span class="__NS__-pagination__step __NS__-pagination__step--next __NS__-pagination__step--disabled">
+        {{- 'content.pagination.next' | t -}}
+      </span>
+    {%- endif -%}
+  </nav>
+{%- endif -%}

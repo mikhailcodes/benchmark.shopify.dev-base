@@ -1,0 +1,27 @@
+@use 'utils' as u;
+
+__NS__-paginated {
+  display: block;
+}
+
+/// The swap is one frame, so the only state worth drawing is the wait before it.
+/// Dimming rather than replacing with a spinner: the cards the visitor is
+/// reading stay legible, and nothing moves.
+__NS__-paginated.is-loading {
+  @include u.transition(opacity);
+
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/// The results region takes focus after a swap so a keyboard and a screen reader
+/// land on the new cards. It is a scripted focus target, never a tab stop, and
+/// it must not draw a ring for a visitor who never asked for it.
+.__NS__-paginated__results:focus {
+  outline: none;
+}
+
+.__NS__-paginated__results:focus-visible {
+  outline: u.rem(2) solid u.role('focus-ring');
+  outline-offset: u.rem(4);
+}

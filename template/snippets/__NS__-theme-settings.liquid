@@ -1,0 +1,23 @@
+{%- comment -%}
+  Bridges Liquid-only data into the bundle. Must render before the vite-tag
+  snippets so window.__NS__Settings exists by the time storefront.ts runs.
+{%- endcomment -%}
+<script>
+  window.theme = window.theme || {};
+  window.theme.moneyFormat = {{ shop.money_format | json }};
+
+  window.__NS__Settings = {
+    devMode: {{ settings.__NS___dev_mode | default: false | json }},
+    routes: {
+      cart: {{ routes.cart_url | json }},
+      cartAdd: {{ routes.cart_add_url | json }},
+      cartChange: {{ routes.cart_change_url | json }},
+      cartUpdate: {{ routes.cart_update_url | json }},
+      predictiveSearch: {{ routes.predictive_search_url | json }}
+    },
+    cart: {
+      count: {{ cart.item_count | json }},
+      total: {{ cart.total_price | json }}
+    }
+  };
+</script>

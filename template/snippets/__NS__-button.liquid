@@ -1,0 +1,45 @@
+{%- comment -%}
+  Renders a __NS_TITLE__ button.
+
+  @param label     {string}  Button text. Required.
+  @param variant   {string}  primary | glass | secondary | tertiary. Default primary.
+  @param href      {string}  Renders an <a> instead of a <button>.
+  @param type      {string}  button | submit. Default button. Ignored when href is set.
+  @param arrow     {boolean} Renders the trailing arrow after the label.
+  @param full      {boolean} Stretch to the container width.
+  @param disabled  {boolean} Disables the control. Links get aria-disabled.
+  @param classes   {string}  Extra classes.
+  @param attrs     {string}  Raw attributes, e.g. 'data-ref="submit"'.
+{%- endcomment -%}
+
+{%- liquid
+  assign variant = variant | default: 'primary'
+  assign button_class = '__NS__-button __NS__-button--' | append: variant
+  if full
+    assign button_class = button_class | append: ' __NS__-button--full'
+  endif
+  if classes != blank
+    assign button_class = button_class | append: ' ' | append: classes
+  endif
+-%}
+
+{%- comment -%}
+  A disabled link is not a thing the platform supports: aria-disabled does not
+  stop Enter from following the href. Disabled always renders a real button.
+{%- endcomment -%}
+{%- if href != blank and disabled != true -%}
+  <a class="{{ button_class }}" href="{{ href }}" {{ attrs }}>
+    {{- label -}}
+    {%- if arrow -%}{%- render '__NS__-icon-arrow' -%}{%- endif -%}
+  </a>
+{%- else -%}
+  <button
+    class="{{ button_class }}"
+    type="{{ type | default: 'button' }}"
+    {% if disabled %}disabled{% endif %}
+    {{ attrs }}
+  >
+    {{- label -}}
+    {%- if arrow -%}{%- render '__NS__-icon-arrow' -%}{%- endif -%}
+  </button>
+{%- endif -%}

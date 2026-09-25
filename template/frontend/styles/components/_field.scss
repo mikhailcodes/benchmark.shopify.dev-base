@@ -1,0 +1,137 @@
+@use '../utils' as u;
+
+/// Figma's "Simple text field" (component set 40007133). Every size in that set
+/// is the same control at a different height, so the height is the one knob a
+/// caller moves; the 48px default is what the contact form draws.
+.__NS__-field {
+  --__NS__-field-height: #{u.fluid(44, 48)};
+  --__NS__-field-border: #{u.role('border-default')};
+
+  display: flex;
+  flex-direction: column;
+  gap: u.rem(8);
+}
+
+/// Labels and values are Geist Regular at the label step's size, leading and
+/// tracking — the weight is the one value the token cannot give, since 'label'
+/// is Medium.
+.__NS__-field__label {
+  @include u.type('label');
+
+  display: flex;
+  align-items: center;
+  gap: u.rem(2);
+  font-weight: 400;
+  color: u.role('text-primary');
+}
+
+.__NS__-field__required {
+  color: u.role('text-subtle');
+}
+
+.__NS__-field__control {
+  @include u.type('label');
+  @include u.focus-ring;
+  @include u.transition(border-color);
+
+  width: 100%;
+  min-height: var(--__NS__-field-height);
+  padding: u.fluid(10, 12) u.rem(8);
+  font-weight: 400;
+  color: u.role('text-primary');
+  background-color: transparent;
+  border: u.rem(1) solid var(--__NS__-field-border);
+  border-radius: u.rem(12);
+
+  &::placeholder {
+    color: u.role('text-subtle');
+    opacity: 1;
+  }
+
+  /// Figma hovers the border to a cool #667D88 the palette has no stop for;
+  /// 'text-muted' is the nearest role and carries the same weight against the
+  /// canvas.
+  &:hover {
+    --__NS__-field-border: #{u.role('text-muted')};
+  }
+
+  &:focus {
+    --__NS__-field-border: #{u.role('text-primary')};
+  }
+
+  &[aria-invalid='true'] {
+    --__NS__-field-border: #{u.role('text-error')};
+  }
+
+  &:disabled {
+    background-color: u.role('background-canvas');
+    color: u.role('text-disabled');
+    cursor: not-allowed;
+  }
+}
+
+textarea.__NS__-field__control {
+  min-height: u.fluid(72, 90);
+  resize: vertical;
+}
+
+.__NS__-field__error {
+  @include u.type('body-s');
+
+  margin: 0;
+  color: u.role('text-error');
+}
+
+.__NS__-field:has(.__NS__-field__error) {
+  --__NS__-field-border: #{u.role('text-error')};
+}
+
+/// The row is the label, so the whole 44px band toggles the box rather than the
+/// 24px square the design draws.
+.__NS__-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: u.fluid(10, 13);
+  min-height: u.control('touch-target');
+  padding-block: u.fluid(8, 10);
+  cursor: pointer;
+}
+
+/// The tick rides in as a background image: Firefox draws no pseudo-element on
+/// an input, so ::after would lose the mark for a third of visitors.
+.__NS__-checkbox__input {
+  @include u.focus-ring;
+  @include u.transition(background-color, border-color);
+
+  flex-shrink: 0;
+  width: u.rem(24);
+  height: u.rem(24);
+  margin: 0;
+  appearance: none;
+  background-color: transparent;
+  border: u.rem(2) solid u.role('border-strong');
+  border-radius: 0;
+  cursor: pointer;
+
+  &:checked {
+    background-color: u.role('text-primary');
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 11' fill='none'%3E%3Cpath d='M1 5.5 5 9.5 13 1' stroke='%23F8F7F2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: u.rem(14);
+    border-color: u.role('text-primary');
+  }
+}
+
+.__NS__-checkbox__label {
+  @include u.type('body-s');
+
+  color: u.role('text-copy');
+
+  /// Figma sets this block at 1.36, tighter than the 1.5 the body steps carry.
+  line-height: 1.36;
+
+  a {
+    color: inherit;
+  }
+}

@@ -1,0 +1,100 @@
+@use 'utils' as u;
+
+__NS__-cart-discount {
+  // .__NS__-field__control reads both of these off its .__NS__-field wrapper, and
+  // this element is that wrapper — without them the control loses its border
+  // entirely, because an undefined custom property makes the whole declaration
+  // invalid rather than falling back. The height matches the secondary button
+  // beside it rather than the 48px the standalone field draws.
+  --__NS__-field-height: #{u.control('height-sm')};
+  --__NS__-field-border: #{u.role('border-default')};
+
+  display: flex;
+  flex-direction: column;
+  gap: u.space('sm');
+  padding: u.space('md') 0;
+  border-top: 1px solid u.role('border-rule');
+
+  &.is-loading {
+    pointer-events: none;
+    opacity: 0.5;
+  }
+}
+
+.__NS__-cart-discount__label {
+  @include u.type('body-s');
+
+  color: u.role('text-muted');
+}
+
+.__NS__-cart-discount__row {
+  display: flex;
+  gap: u.space('sm');
+  align-items: stretch;
+}
+
+.__NS__-cart-discount__input {
+  flex: 1;
+  min-width: 0;
+  text-transform: uppercase;
+}
+
+.__NS__-cart-discount__apply {
+  flex: none;
+}
+
+.__NS__-cart-discount__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: u.space('sm');
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.__NS__-cart-discount__pill {
+  display: flex;
+  gap: u.space('sm');
+  align-items: center;
+  padding: u.rem(4) u.rem(6) u.rem(4) u.fluid(9, 12);
+  background: u.glass('fill-weak');
+  border: 1px solid u.role('border-default');
+  border-radius: u.radius('full');
+}
+
+.__NS__-cart-discount__code {
+  @include u.type('caption');
+
+  color: u.role('text-primary');
+  text-transform: uppercase;
+}
+
+.__NS__-cart-discount__remove {
+  @include u.focus-ring($offset: -2px);
+  @include u.transition(opacity);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: u.rem(20);
+  height: u.rem(20);
+  color: u.role('text-muted');
+  cursor: pointer;
+  background: none;
+  border: 0;
+
+  &:hover {
+    opacity: 0.6;
+  }
+}
+
+.__NS__-cart-discount__error {
+  @include u.type('caption');
+
+  margin: 0;
+  color: u.role('status-error');
+
+  &:empty {
+    display: none;
+  }
+}

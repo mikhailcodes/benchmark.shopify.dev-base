@@ -1,0 +1,83 @@
+# Dependencies
+node_modules/
+
+# Environment variables and credentials
+.env
+.env.local
+.env.*.local
+shopify.theme.toml
+setup.config.json
+
+# Vite
+dist/
+dist-ssr/
+*.local
+.vite/
+# The Vite manifest must be committed: vite.config.js reads it to delete the
+# previous build's hashed assets, and CI has no other record of them.
+!assets/.vite/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.sw?
+
+# Claude Code — shared config is committed, per-machine overrides are not.
+.claude/settings.local.json
+
+# OS files
+.DS_Store
+Thumbs.db
+*~
+.Spotlight-V100
+.Trashes
+
+# Shopify
+# config/settings_data.json is deliberately NOT ignored: Shopify's GitHub
+# integration commits theme-editor changes back to the branch, so ignoring it
+# would drop merchant settings on the next push.
+.shopify/
+
+# Scratch space for reference copies of the theme.
+initial build/
+
+# Build artifacts
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+
+# Caches
+.eslintcache
+.cache
+coverage
+*.lcov
+
+# Yarn 4 — node-modules linker, so no PnP files are expected.
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnp.*
+
+# Lock files (Yarn only; yarn.lock is committed)
+package-lock.json
+bun.lock
+bun.lockb
+pnpm-lock.yaml
+
+# Licensed font sources. Plantin MT Pro and Brandon Grotesque are paid faces, and
+# Geist ships under OFL — none of them belong in the repository. The woff2 files
+# the theme actually loads live in Settings > Files, so a theme swap cannot take
+# the typography with it. See snippets/__NS__-fonts.liquid.
+*.ttf
+*.otf
+*.woff
+*.woff2
+Plantin MT Pro/

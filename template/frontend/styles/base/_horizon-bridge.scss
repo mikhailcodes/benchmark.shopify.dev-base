@@ -1,0 +1,104 @@
+@use '../utils' as u;
+
+/// Horizon is built on custom properties, so repointing them repaints the base
+/// theme with __NS_TITLE__ values without touching one Horizon selector — and survives
+/// a theme upgrade. This is the first place to look when a stock Horizon
+/// component renders in the wrong colour or font.
+///
+/// Our stylesheet is last in <head> and unlayered, so equal specificity wins.
+/// Never wrap this in @layer: unlayered declarations beat layered ones at any
+/// source order, and Horizon is entirely unlayered.
+:root {
+  --color-foreground: #{u.role-hex('text-primary')};
+  --color-foreground-rgb: #{u.channels('text-primary')};
+  --color-background: #{u.role-hex('background-canvas')};
+  --color-background-rgb: #{u.channels('background-canvas')};
+  --color-border: #{u.role-hex('border-default')};
+  --color-border-rgb: #{u.channels('border-default')};
+
+  --color-error: #{u.role-hex('status-error')};
+  --color-success: #{u.role-hex('status-success')};
+  --color-instock: #{u.role-hex('status-success')};
+  --color-lowstock: #{u.role-hex('status-warning')};
+  --color-outofstock: #{u.role-hex('status-error')};
+
+  --color-input-background: #{u.role-hex('surface-default')};
+  --color-input-border: #{u.role-hex('border-default')};
+  --color-input-text: #{u.role-hex('text-primary')};
+
+  --color-primary-button-background: #{u.role-hex('action-primary')};
+  --color-primary-button-text: #{u.role-hex('text-on-dark')};
+  --color-primary-button-border: #{u.role-hex('action-primary')};
+  --color-primary-button-hover-background: #{u.role-hex('action-primary-mid')};
+  --color-primary-button-hover-text: #{u.role-hex('text-on-dark')};
+  --color-primary-button-hover-border: #{u.role-hex('action-primary-mid')};
+  --color-secondary-button-background: transparent;
+  --color-secondary-button-text: #{u.role-hex('text-primary')};
+  --color-secondary-button-border: #{u.role-hex('border-default')};
+  --color-secondary-button-hover-text: #{u.role-hex('text-primary')};
+
+  --font-body--family: #{u.family('body')};
+  --font-body--weight: 300;
+  --font-heading--family: #{u.family('display')};
+  --font-heading--weight: 300;
+  --font-subheading--family: #{u.family('body')};
+  --font-subheading--weight: 500;
+  --font-accent--family: #{u.family('eyebrow')};
+  --font-accent--weight: 500;
+
+  --font-size--xs: #{u.rem(12)};
+  --font-size--sm: #{u.rem(14)};
+  --font-size--md: #{u.rem(16)};
+  --font-size--lg: #{u.fluid(18, 20)};
+  --font-size--xl: #{u.fluid(20, 24)};
+
+  --style-border-radius-xs: #{u.radius('xs')};
+  --style-border-radius-sm: #{u.radius('sm')};
+  --style-border-radius-md: #{u.radius('md')};
+  --style-border-radius-lg: #{u.radius('lg')};
+  --style-border-radius-buttons-primary: #{u.radius('pill')};
+  --style-border-radius-buttons-secondary: #{u.radius('pill')};
+  --style-border-radius-pills: #{u.radius('full')};
+  --style-border-radius-inputs: #{u.radius('sm')};
+  --style-border-radius-popover: #{u.radius('md')};
+  --border-radius-sm: #{u.radius('sm')};
+
+  --padding-xs: #{u.space('xs')};
+  --padding-sm: #{u.space('sm')};
+  --padding-md: #{u.space('md')};
+  --padding-lg: #{u.space('lg')};
+  --padding-xl: #{u.space('xl')};
+  --gap-xs: #{u.space('xs')};
+  --gap-sm: #{u.space('sm')};
+  --gap-md: #{u.space('md')};
+  --gap-lg: #{u.space('lg')};
+  --gap-xl: #{u.space('xl')};
+
+  --button-padding-inline: #{u.control('pad-lg')};
+  --button-size: #{u.control('height-lg')};
+  --button-size-md: #{u.control('height-md')};
+  --height-buy-buttons: #{u.control('height-lg')};
+  --minimum-touch-target: #{u.control('touch-target')};
+  --shadow-button: #{u.shadow('control')};
+  --input-padding-x: #{u.space('md')};
+  --input-padding-y: #{u.space('sm')};
+
+  --focus-outline-width: #{u.rem(2)};
+  --focus-outline-offset: #{u.rem(2)};
+
+  --animation-speed-fast: #{u.duration('fast')};
+  --animation-speed-medium: #{u.duration('base')};
+  --animation-speed-slow: #{u.duration('slow')};
+  --animation-easing: #{u.easing('out')};
+}
+
+/// sections/header.liquid declares these, and base.css multiplies the first two
+/// into every first-section top offset. The __NS_TITLE__ header replaces that section,
+/// so without a declaration here the calc() is invalid and the offset is
+/// dropped. __NS__-header overwrites the measured pair on <body> at mount; the
+/// transparent flag stays 0 because the __NS_TITLE__ header is never transparent.
+:root {
+  --header-height: 0px;
+  --header-group-height: 0px;
+  --transparent-header-offset-boolean: 0;
+}
