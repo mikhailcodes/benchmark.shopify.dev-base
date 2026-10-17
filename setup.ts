@@ -213,6 +213,8 @@ interface SetupConfig {
   storefrontPassword: string;
   environmentName: string;
   themeId: string | null;
+  /** Config-file runs only: false skips installing benchmark-tools. Interactive runs ask. */
+  installTooling?: boolean;
   // Fixed: every project converged on these, and keeping the alternatives alive
   // meant the generated code was never good at any of them.
   stylingApproach: 'scss';
@@ -2576,7 +2578,160 @@ async function runInitialBuild(): Promise<void> {
 // FINALIZATION
 // =============================================================================
 
-function displayNextSteps(config: SetupConfig): void {
+const BENCHMARK_TOOLS_REPO = 'benchmarkcommerce/benchmark-tools';
+const REQUIRED_PLUGINS = [
+  'benchmark-tools@benchmark-tools',
+  'mattpocock-skills@claude-plugins-official',
+] as const;
+
+type PluginState = 'enabled' | 'disabled' | 'missing';
+
+async function getPluginStates(): Promise<Map<string, PluginState>> {
+  const _states = new Map<string, PluginState>(REQUIRED_PLUGINS.map((_id) => [_id, 'missing']));
+  const _result = await $`claude plugin list --json`.quiet().nothrow();
+  if (_result.exitCode !== 0) return _states;
+
+  try {
+    const _plugins = JSON.parse(_result.stdout.toString()) as { id: string; enabled: boolean }[];
+    for (const _plugin of _plugins) {
+      if (_states.has(_plugin.id)) _states.set(_plugin.id, _plugin.enabled ? 'enabled' : 'disabled');
+    }
+  } catch {
+    return _states;
+  }
+  return _states;
+}
+
+function logToolingCommands(): void {
+  log(`   claude plugin marketplace add ${BENCHMARK_TOOLS_REPO}`, colors.yellow);
+  REQUIRED_PLUGINS.forEach((_id) => log(`   claude plugin install ${_id}`, colors.yellow));
+}
+
+/**
+ * The project's workflow (profile, tickets, plan, review, ship) runs through the
+ * benchmark-tools Claude Code plugin, so a new theme is not finished until it is
+ * installed.
+ */
+async function ensureBenchmarkTools(config: SetupConfig, interactive: boolean): Promise<boolean> {
+  header('Benchmark tooling');
+
+  if (!Bun.which('claude')) {
+    log('Claude Code is not installed. Install it, then run:', colors.yellow);
+    logToolingCommands();
+    return false;
+  }
+
+  const _states = await getPluginStates();
+  const _pending = REQUIRED_PLUGINS.filter((_id) => _states.get(_id) !== 'enabled');
+  if (_pending.length === 0) {
+    log('benchmark-tools and mattpocock-skills are installed.', colors.green);
+    return true;
+  }
+
+  log('This project runs its workflow through Claude Code plugins that are not set up yet:', colors.yellow);
+  _pending.forEach((_id) => log(`   ${_id} (${_states.get(_id)})`, colors.cyan));
+
+  const _install = interactive
+    ? ['', 'y', 'yes'].includes((await prompt('Install them now? (Y/n):')).toLowerCase())
+    : config.installTooling !== false;
+  if (!_install) {
+    log('Skipped. Install them later with:', colors.yellow);
+    logToolingCommands();
+    return false;
+  }
+
+  if (_states.get('benchmark-tools@benchmark-tools') === 'missing') {
+    // Fails harmlessly when the marketplace is already registered.
+    await $`claude plugin marketplace add ${BENCHMARK_TOOLS_REPO}`.quiet().nothrow();
+  }
+
+  for (const _id of _pending) {
+    const _action = _states.get(_id) === 'disabled' ? 'enable' : 'install';
+    const _result = await $`claude plugin ${_action} ${_id}`.quiet().nothrow();
+    if (_result.exitCode !== 0) {
+      log(`Could not ${_action} ${_id}:`, colors.red);
+      log(`   ${_result.stderr.toString().trim()}`, colors.dim);
+      log('Install it by hand with:', colors.yellow);
+      logToolingCommands();
+      return false;
+    }
+    log(`${_action === 'enable' ? 'Enabled' : 'Installed'}: ${_id}`, colors.green);
+  }
+  return true;
+}
+
+/**
+ * Seeds docs/agents/project.md with what setup already knows. /kickoff setup
+ * recognises the draft status and fills in only the tracker values left open.
+ */
+async function createProjectProfile(config: SetupConfig): Promise<void> {
+  header('Creating docs/agents/project.md');
+
+  const _preview = config.themeId
+    ? `https://${config.storeUrl}/?preview_theme_id=${config.themeId} (environment "${config.environmentName}")`
+    : '<set by /kickoff setup>';
+  const _branches = config.githubIntegration
+    ? '- **Production:** main\n- **PR target:** <set by /kickoff setup>\n- **Test branch:** <set by /kickoff setup> (Shopify\'s GitHub integration syncs main, staging and qa to themes)'
+    : '- **Production:** main\n- **PR target:** main\n- **Test branch:** none (CLI deploys only)';
+
+  const _profile = `# Project profile: ${config.projectName}
+
+Status: draft. Run \`/kickoff setup\` in Claude Code to fill in the values marked "set by /kickoff setup".
+
+## Project
+
+- **Client:** ${config.projectName}
+- **Owner:** benchmark
+- **Type:** shopify-theme
+- **GitHub:** <set by /kickoff setup>
+
+## Tracker
+
+- **Tracker:** clickup
+- **Location:** <set by /kickoff setup>
+- **Server:** ClickUp connector
+- **Task ID prefix:** <set by /kickoff setup>
+- **Statuses:** <set by /kickoff setup>
+- **Status changes:** agents move tasks to In progress on claim and to In review when the PR opens.
+  Done comes from the merge (tracker automation) or a human. Agents never log time.
+
+## Branches
+
+${_branches}
+- **Branch name:** <type>/<id>-<slug>  e.g. feat/bc-179-tracking-taxonomy
+- **No ticket:** <type>/<slug>
+- **Rule:** lowercase, at most 50 characters, \`-2\` suffix when the name is taken.
+
+## Quality gates
+
+- \`yarn type-check\`
+- \`yarn lint\`
+- \`shopify theme check\` (only new offenses count)
+
+Never run a build command as a gate.
+
+## Preview
+
+${_preview}
+
+## Review
+
+- **Reviewer:** from ~/.claude/benchmark-tools.json
+- **PR reviewers:** <set by /kickoff setup>
+
+## Comments
+
+- **Audience:** client
+- **Language:** plain outcomes a client can check in ten seconds. Every posted comment goes
+  through stop-slop first and contains only the comment and its links.
+`;
+
+  await mkdir('docs/agents', { recursive: true });
+  await writeFile('docs/agents/project.md', _profile);
+  log('Created: docs/agents/project.md (draft)', colors.green);
+}
+
+function displayNextSteps(config: SetupConfig, toolingReady: boolean): void {
   header('Setup Complete!');
 
   log('Your Shopify theme development environment is ready.\n', colors.green);
@@ -2596,9 +2751,20 @@ function displayNextSteps(config: SetupConfig): void {
   log('   yarn deploy', colors.yellow);
   console.log();
 
-  log('4. Read the documentation:', colors.cyan);
+  log('4. Kick off the project in Claude Code:', colors.cyan);
+  if (!toolingReady) {
+    log('   Install the tooling first:', colors.dim);
+    logToolingCommands();
+  }
+  log('   claude', colors.yellow);
+  log('   /kickoff setup   finish the profile: ClickUp list, statuses, reviewers', colors.yellow);
+  log('   /kickoff new     brief, wayfinder decisions, kickoff tickets', colors.yellow);
+  console.log();
+
+  log('5. Read the documentation:', colors.cyan);
   log('   - .claude/CLAUDE.md (project rules)', colors.dim);
   log('   - frontend/CLAUDE.md (frontend guide)', colors.dim);
+  log('   - docs/agents/project.md (tracker, branches, gates)', colors.dim);
   console.log();
 
   log('Happy coding!', colors.green + colors.bright);
@@ -2662,6 +2828,8 @@ async function main(): Promise<void> {
     await createExampleSection(_config);
     await createClaudeMd(_config);
     await createAgents(_config);
+    await createProjectProfile(_config);
+    const _toolingReady = await ensureBenchmarkTools(_config, _configFlag === -1);
 
     if (_config.themeSource === 'new') {
       await pullTheme(_config);
@@ -2669,7 +2837,7 @@ async function main(): Promise<void> {
 
     await runInitialBuild();
 
-    displayNextSteps(_config);
+    displayNextSteps(_config, _toolingReady);
   } catch (_error) {
     log('\nSetup failed:', colors.red);
     console.error(_error);

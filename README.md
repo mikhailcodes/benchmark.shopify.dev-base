@@ -22,6 +22,19 @@ Add `--yes` to accept every default without prompting.
 | Deploy | GitHub integration owns the live theme | the alternative is CLI push only |
 | Credentials | skip | writes the gitignored `shopify.theme.toml` |
 | Install and verify | yes | `yarn install`, then type-check, lint, boundary, build |
+| Install Benchmark tooling | yes | installs the `benchmark-tools` and `mattpocock-skills` Claude Code plugins when missing; `"installTooling": false` in a config file skips it |
+
+## Project workflow
+
+Every generated theme gets `docs/agents/project.md`, a draft profile that the
+[benchmark-tools](https://github.com/benchmarkcommerce/benchmark-tools) plugin reads
+for tracker, branches, gates and reviewer. Setup checks the plugin is installed and
+offers to install it. Then, in Claude Code:
+
+```
+/kickoff setup   # finish the profile: ClickUp list, statuses, reviewers
+/kickoff new     # brief, wayfinder decisions, kickoff tickets
+```
 
 It then records the `shopify theme check` baseline into `.claude/CLAUDE.md`, and
 offers a commit per stage: pristine Horizon first, the layer second. That split is
