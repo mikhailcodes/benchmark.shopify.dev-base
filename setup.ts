@@ -16,10 +16,6 @@ import { readdir, mkdir, writeFile, readFile, stat } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import * as readline from 'node:readline';
 
-// =============================================================================
-// TERMINAL COLORS & UTILITIES
-// =============================================================================
-
 const colors = {
   reset: '\x1b[0m',
   bright: '\x1b[1m',
@@ -191,10 +187,6 @@ example.shopify.theme.toml
 Thumbs.db
 `;
 
-// =============================================================================
-// TYPES
-// =============================================================================
-
 interface SetupConfig {
   projectName: string;
   projectNameSafe: string; // For window object (no hyphens)
@@ -234,10 +226,6 @@ interface ThemeScanResult {
   globalObjects: string[];
   pubsubPattern: boolean;
 }
-
-// =============================================================================
-// SHOPIFY HELPERS
-// =============================================================================
 
 async function getShopifyThemes(storeUrl: string, password: string): Promise<ThemeInfo[]> {
   try {
@@ -419,10 +407,6 @@ function displayThemeScanResults(scan: ThemeScanResult): void {
   }
 }
 
-// =============================================================================
-// INTERACTIVE QUESTIONS
-// =============================================================================
-
 /**
  * Reads answers from a JSON file instead of prompting.
  *
@@ -552,10 +536,6 @@ async function askQuestions(): Promise<SetupConfig> {
     packageManager: 'yarn',
   };
 }
-
-// =============================================================================
-// FILE GENERATORS
-// =============================================================================
 
 async function createDirectoryStructure(config: SetupConfig): Promise<void> {
   header('Creating Directory Structure');
@@ -962,10 +942,6 @@ ${_assetStep}
   await writeFile('.github/workflows/build.yml', _workflow);
   log('Created: .github/workflows/build.yml', colors.green);
 }
-
-// =============================================================================
-// FRONTEND FILES
-// =============================================================================
 
 function toPascalCase(value: string): string {
   return value
@@ -1698,10 +1674,6 @@ ${_tag}.is-active .${_block}__action {
   await writeFile(`frontend/styles/sections/_${_tag}.scss`, _scss);
   log(`Created: frontend/styles/sections/_${_tag}.scss`, colors.green);
 }
-
-// =============================================================================
-// CLAUDE FILES
-// =============================================================================
 
 async function createClaudeMd(config: SetupConfig): Promise<void> {
   header('Creating CLAUDE.md Files');
@@ -2525,10 +2497,6 @@ _trapFocus(container) {
   log('Created: .claude/agents/accessibility.md', colors.green);
 }
 
-// =============================================================================
-// THEME OPERATIONS
-// =============================================================================
-
 async function pullTheme(config: SetupConfig): Promise<void> {
   if (!config.themeId) {
     log('\nSkipping theme pull - no theme selected', colors.yellow);
@@ -2573,10 +2541,6 @@ async function runInitialBuild(): Promise<void> {
     log('Build failed - you may need to fix errors first', colors.yellow);
   }
 }
-
-// =============================================================================
-// FINALIZATION
-// =============================================================================
 
 const BENCHMARK_TOOLS_REPO = 'benchmarkcommerce/benchmark-tools';
 const REQUIRED_PLUGINS = [
@@ -2769,10 +2733,6 @@ function displayNextSteps(config: SetupConfig, toolingReady: boolean): void {
 
   log('Happy coding!', colors.green + colors.bright);
 }
-
-// =============================================================================
-// MAIN
-// =============================================================================
 
 async function main(): Promise<void> {
   try {
